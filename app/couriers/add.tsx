@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, ScrollView, StyleSheet, Pressable, Text, Alert } from 'react-native';
+import { View, ScrollView, StyleSheet, Pressable, Text, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { useMutation } from 'convex/react';
@@ -34,7 +34,16 @@ export default function AddCourierScreen() {
 
         if (!form.senderName.trim()) newErrors.senderName = 'Sender name is required';
         if (!form.receiverName.trim()) newErrors.receiverName = 'Receiver name is required';
-        if (!form.receiverPhone.trim()) newErrors.receiverPhone = 'Phone number is required';
+
+        if (!form.receiverPhone.trim()) {
+            newErrors.receiverPhone = 'Phone number is required';
+        } else {
+            const digits = form.receiverPhone.replace(/\D/g, '');
+            if (digits.length !== 10) {
+                newErrors.receiverPhone = 'Phone number must be exactly 10 digits';
+            }
+        }
+
         if (!form.pickupAddress.trim()) newErrors.pickupAddress = 'Pickup address is required';
         if (!form.deliveryAddress.trim()) newErrors.deliveryAddress = 'Delivery address is required';
 
@@ -57,7 +66,7 @@ export default function AddCourierScreen() {
             });
 
             Alert.alert('Success', 'Courier created successfully', [
-                { text: 'OK', onPress: () => router.back() },
+                { text: 'OK', onPress: () => router.replace('/couriers') },
             ]);
         } catch (error) {
             Alert.alert('Error', 'Failed to create courier. Please try again.');
@@ -79,69 +88,82 @@ export default function AddCourierScreen() {
         <SafeAreaView style={globalStyles.safeArea} edges={['bottom']}>
             <Stack.Screen options={{ title: 'Add Courier' }} />
 
-            <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-                <FormInput
-                    label="Sender Name"
-                    value={form.senderName}
-                    onChangeText={(v) => updateField('senderName', v)}
-                    placeholder="Enter sender name"
-                    error={errors.senderName}
-                />
+            <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={{ flex: 1 }}
+                keyboardVerticalOffset={100}
+            >
+                <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+                    <FormInput
+                        label="Sender Name"
+                        value={form.senderName}
+                        onChangeText={(v) => updateField('senderName', v)}
+                        placeholder="Enter sender name"
+                        error={errors.senderName}
+                    />
 
-                <FormInput
-                    label="Receiver Name"
-                    value={form.receiverName}
-                    onChangeText={(v) => updateField('receiverName', v)}
-                    placeholder="Enter receiver name"
-                    error={errors.receiverName}
-                />
+                    <FormInput
+                        label="Receiver Name"
+                        value={form.receiverName}
+                        onChangeText={(v) => updateField('receiverName', v)}
+                        placeholder="Enter receiver name"
+                        error={errors.receiverName}
+                    />
 
-                <FormInput
-                    label="Receiver Phone"
-                    value={form.receiverPhone}
-                    onChangeText={(v) => updateField('receiverPhone', v)}
-                    placeholder="Enter phone number"
-                    keyboardType="phone-pad"
-                    error={errors.receiverPhone}
-                />
+                    <FormInput
+                        label="Receiver Phone"
+                        value={form.receiverPhone}
+                        onChangeText={(v) => {
+                            // Only allow digits
+                            const numeric = v.replace(/[^0-9]/g, '');
+                            if (numeric.length <= 10) {
+                                updateField('receiverPhone', numeric);
+                            }
+                        }}
+                        placeholder="Enter 10-digit phone number"
+                        keyboardType="phone-pad"
+                        error={errors.receiverPhone}
+                        maxLength={10}
+                    />
 
-                <FormInput
-                    label="Pickup Address"
-                    value={form.pickupAddress}
-                    onChangeText={(v) => updateField('pickupAddress', v)}
-                    placeholder="Enter pickup address"
-                    multiline
-                    error={errors.pickupAddress}
-                />
+                    <FormInput
+                        label="Pickup Address"
+                        value={form.pickupAddress}
+                        onChangeText={(v) => updateField('pickupAddress', v)}
+                        placeholder="Enter pickup address"
+                        multiline
+                        error={errors.pickupAddress}
+                    />
 
-                <FormInput
-                    label="Delivery Address"
-                    value={form.deliveryAddress}
-                    onChangeText={(v) => updateField('deliveryAddress', v)}
-                    placeholder="Enter delivery address"
-                    multiline
-                    error={errors.deliveryAddress}
-                />
+                    <FormInput
+                        label="Delivery Address"
+                        value={form.deliveryAddress}
+                        onChangeText={(v) => updateField('deliveryAddress', v)}
+                        placeholder="Enter delivery address"
+                        multiline
+                        error={errors.deliveryAddress}
+                    />
 
-                <FormInput
-                    label="Notes (Optional)"
-                    value={form.notes}
-                    onChangeText={(v) => updateField('notes', v)}
-                    placeholder="Any additional notes"
-                    multiline
-                />
+                    <FormInput
+                        label="Notes (Optional)"
+                        value={form.notes}
+                        onChangeText={(v) => updateField('notes', v)}
+                        placeholder="Any additional notes"
+                        multiline
+                    />
 
-                <Pressable
-                    style={({ pressed }) => [
-                        globalStyles.button,
-                        pressed && styles.buttonPressed,
-                        styles.submitButton,
-                    ]}
-                    onPress={handleSubmit}
-                >
-                    <Text style={globalStyles.buttonText}>Create Courier</Text>
-                </Pressable>
-            </ScrollView>
+                    <Pressable
+                        style={({ pressed }) => [
+                            globalStyles.button,
+                            pressed && styles.buttonPressed,
+                            styles.submitButton,
+                        ]}
+                        onPress={handleSubmit}
+                    >
+                        <Text style={globalStyles.buttonText}>Create Courier</Text>
+                    </Pressable>
+                </ScrollView>
+            </KeyboardAvoidingView>
         </SafeAreaView>
     );
 }

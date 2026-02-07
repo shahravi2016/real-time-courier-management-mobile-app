@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { View, FlatList, TextInput, StyleSheet, Pressable, Text } from 'react-native';
+import { View, FlatList, TextInput, StyleSheet, Pressable, Text, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { useQuery } from 'convex/react';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { api } from '../../convex/_generated/api';
 import { CourierCard, LoadingState, EmptyState } from '../../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
@@ -56,6 +58,45 @@ export default function CourierListScreen() {
         return result;
     }, [couriers, searchTerm, selectedFilter]);
 
+    const handleExport = async () => {
+        if (!couriers || couriers.length === 0) {
+            Alert.alert('No Data', 'There are no couriers to export.');
+            return;
+        }
+
+        const headers = "Tracking ID,Sender,Receiver,Phone,Status,Pickup,Delivery,Notes,Created At\n";
+        const csv = couriers.map(c =>
+            `"${c.trackingId}","${c.senderName}","${c.receiverName}","${c.receiverPhone}","${c.currentStatus}","${c.pickupAddress}","${c.deliveryAddress}","${c.notes || ''}","${new Date(c.createdAt).toISOString()}"`
+        ).join('\n');
+        const csvContent = headers + csv;
+
+        try {
+            if (Platform.OS === 'web') {
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = "couriers_export.csv";
+                link.click();
+            } else {
+                const FS = FileSystem as any;
+                const fileUri = FS.documentDirectory + "couriers_export.csv";
+                if (fileUri) {
+                    await FS.writeAsStringAsync(fileUri, csvContent, { encoding: FS.EncodingType.UTF8 });
+
+                    if (await Sharing.isAvailableAsync()) {
+                        await Sharing.shareAsync(fileUri);
+                    } else {
+                        Alert.alert('Error', 'Sharing is not available on this device');
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Export failed:', error);
+            Alert.alert('Error', 'Failed to export data');
+        }
+    };
+
     if (!couriers) {
         return (
             <SafeAreaView style={globalStyles.safeArea} edges={['bottom']}>
@@ -71,9 +112,14 @@ export default function CourierListScreen() {
                 options={{
                     title: 'Couriers',
                     headerRight: () => (
-                        <Pressable onPress={() => router.push('/couriers/add')}>
-                            <Text style={styles.addButton}>+ Add</Text>
-                        </Pressable>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Pressable onPress={handleExport} style={{ marginRight: spacing.md }}>
+                                <Text style={styles.headerButton}>Export</Text>
+                            </Pressable>
+                            <Pressable onPress={() => router.push('/couriers/add')}>
+                                <Text style={styles.headerButton}>+ Add</Text>
+                            </Pressable>
+                        </View>
                     ),
                 }}
             />
@@ -146,7 +192,7 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingHorizontal: spacing.md,
     },
-    addButton: {
+    headerButton: {
         color: colors.primary,
         fontSize: fontSize.md,
         fontWeight: '600',

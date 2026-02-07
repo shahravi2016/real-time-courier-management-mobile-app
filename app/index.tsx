@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, Stack } from 'expo-router';
 import { useQuery } from 'convex/react';
 import { api } from '../convex/_generated/api';
 import { StatCard, LoadingState } from '../src/components';
@@ -14,6 +14,7 @@ export default function DashboardScreen() {
     if (!stats) {
         return (
             <SafeAreaView style={globalStyles.safeArea}>
+                <Stack.Screen options={{ headerShown: false }} />
                 <LoadingState message="Loading dashboard..." />
             </SafeAreaView>
         );
@@ -21,6 +22,7 @@ export default function DashboardScreen() {
 
     return (
         <SafeAreaView style={globalStyles.safeArea}>
+            <Stack.Screen options={{ headerShown: false }} />
             <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
                 {/* Header */}
                 <View style={styles.header}>
@@ -30,27 +32,30 @@ export default function DashboardScreen() {
 
                 {/* Stats Grid */}
                 <View style={styles.statsGrid}>
+                    {/* Summary Row */}
                     <View style={styles.statsRow}>
                         <StatCard
                             icon="📦"
-                            label="Total"
+                            label="Total Couriers"
                             value={stats.total}
                             color={colors.primary}
                         />
                         <View style={{ width: spacing.sm }} />
                         <StatCard
-                            icon="✅"
-                            label="Delivered"
-                            value={stats.delivered}
-                            color={colors.delivered}
-                        />
-                    </View>
-                    <View style={styles.statsRow}>
-                        <StatCard
                             icon="⏳"
                             label="Pending"
                             value={stats.pending}
                             color={colors.pending}
+                        />
+                    </View>
+
+                    {/* Progress Row 1 */}
+                    <View style={styles.statsRow}>
+                        <StatCard
+                            icon="🥡"
+                            label="Picked Up"
+                            value={stats.pickedUp}
+                            color={colors.pickedUp}
                         />
                         <View style={{ width: spacing.sm }} />
                         <StatCard
@@ -60,20 +65,42 @@ export default function DashboardScreen() {
                             color={colors.inTransit}
                         />
                     </View>
+
+                    {/* Progress Row 2 */}
                     <View style={styles.statsRow}>
                         <StatCard
                             icon="📤"
-                            label="Out"
+                            label="Out for Delivery"
                             value={stats.outForDelivery}
                             color={colors.outForDelivery}
                         />
                         <View style={{ width: spacing.sm }} />
+                        <StatCard
+                            icon="✅"
+                            label="Delivered"
+                            value={stats.delivered}
+                            color={colors.delivered}
+                        />
+                    </View>
+
+                    {/* Final Row */}
+                    <View style={styles.statsRow}>
                         <StatCard
                             icon="❌"
                             label="Cancelled"
                             value={stats.cancelled}
                             color={colors.cancelled}
                         />
+                        <View style={{ width: spacing.sm }} />
+                        {/* Invisible spacer to maintain grid alignment */}
+                        <View style={{ flex: 1, opacity: 0 }} pointerEvents="none">
+                            <StatCard
+                                icon="❌"
+                                label="Cancelled"
+                                value={0}
+                                color={colors.cancelled}
+                            />
+                        </View>
                     </View>
                 </View>
 

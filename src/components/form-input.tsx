@@ -8,8 +8,9 @@ interface FormInputProps {
     onChangeText: (text: string) => void;
     placeholder?: string;
     multiline?: boolean;
-    keyboardType?: 'default' | 'phone-pad' | 'email-address';
+    keyboardType?: 'default' | 'phone-pad' | 'email-address' | 'numeric';
     error?: string;
+    maxLength?: number;
 }
 
 export function FormInput({
@@ -20,6 +21,7 @@ export function FormInput({
     multiline = false,
     keyboardType = 'default',
     error,
+    maxLength,
 }: FormInputProps) {
     return (
         <View style={styles.container}>
@@ -37,6 +39,7 @@ export function FormInput({
                 multiline={multiline}
                 numberOfLines={multiline ? 3 : 1}
                 keyboardType={keyboardType}
+                maxLength={maxLength}
             />
             {error && <Text style={styles.error}>{error}</Text>}
         </View>

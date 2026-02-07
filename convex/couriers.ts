@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { Id } from "./_generated/dataModel";
 
 // Generate a unique tracking ID
 function generateTrackingId(): string {
@@ -84,6 +85,26 @@ export const filterByStatus = query({
     },
 });
 
+// Get logs for a courier or all logs
+export const getLogs = query({
+    args: { courierId: v.optional(v.id("couriers")) },
+    handler: async (ctx, args) => {
+        if (args.courierId) {
+            return await ctx.db
+                .query("logs")
+                .withIndex("by_courierId", (q) => q.eq("courierId", args.courierId))
+                .order("desc")
+                .collect();
+        }
+        // Return global logs if no ID provided (limit to recent 50 for performance)
+        return await ctx.db
+            .query("logs")
+            .withIndex("by_timestamp")
+            .order("desc")
+            .take(50);
+    },
+});
+
 // Create a new courier
 export const create = mutation({
     args: {
@@ -113,6 +134,15 @@ export const create = mutation({
             updatedAt: now,
         });
 
+        // Log creation
+        await ctx.db.insert("logs", {
+            courierId,
+            trackingId,
+            action: "created",
+            description: "Courier created by Admin",
+            timestamp: now,
+        });
+
         return courierId;
     },
 });
@@ -131,9 +161,11 @@ export const update = mutation({
     },
     handler: async (ctx, args) => {
         const { id, ...updates } = args;
+        const courier = await ctx.db.get(id);
+        if (!courier) throw new Error("Courier not found");
 
         // Filter out undefined values
-        const filteredUpdates: Record<string, string | number> = {};
+        const filteredUpdates: Record<string, any> = {};
         for (const [key, value] of Object.entries(updates)) {
             if (value !== undefined) {
                 filteredUpdates[key] = value;
@@ -143,6 +175,15 @@ export const update = mutation({
         await ctx.db.patch(id, {
             ...filteredUpdates,
             updatedAt: Date.now(),
+        });
+
+        // Log update
+        await ctx.db.insert("logs", {
+            courierId: id,
+            trackingId: courier.trackingId,
+            action: "updated",
+            description: "Courier details updated",
+            timestamp: Date.now(),
         });
     },
 });
@@ -161,9 +202,26 @@ export const updateStatus = mutation({
         ),
     },
     handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Courier not found");
+
+        const oldStatus = courier.currentStatus;
+
         await ctx.db.patch(args.id, {
             currentStatus: args.status,
             updatedAt: Date.now(),
+        });
+
+        // Log status change
+        // Format status for display (e.g., "picked_up" -> "Picked Up")
+        const formatStatus = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+
+        await ctx.db.insert("logs", {
+            courierId: args.id,
+            trackingId: courier.trackingId,
+            action: "status_changed",
+            description: `Status changed: ${formatStatus(oldStatus)} → ${formatStatus(args.status)}`,
+            timestamp: Date.now(),
         });
     },
 });
@@ -172,6 +230,24 @@ export const updateStatus = mutation({
 export const remove = mutation({
     args: { id: v.id("couriers") },
     handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Courier not found");
+
         await ctx.db.delete(args.id);
+
+        // Log deletion (courierId is optional, but we pass it anyway as it might be useful for history if we keep logs)
+        // Wait, if we delete the courier, the query for logs by courierId might still work if we just query the logs table directly
+        // but typically we'd want to keep the trackingId primarily.
+
+        await ctx.db.insert("logs", {
+            trackingId: courier.trackingId,
+            action: "deleted",
+            description: "Courier deleted",
+            timestamp: Date.now(),
+            // We don't verify if courierId makes sense here since doc is gone, but we can store the ID string if we want
+            // or just omit it. Schema says v.optional(v.id("couriers")).
+            // If we store it, it points to nothing.
+            courierId: args.id,
+        });
     },
 });

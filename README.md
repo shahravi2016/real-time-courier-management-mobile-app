@@ -15,6 +15,9 @@ A fast, cross-platform courier management mobile app built with **React Native (
 - **Search & Filter** - Search by tracking ID, name, or phone; filter by status
 - **Cross-Platform** - Works on Android, iOS, and Web
 - **Minimalist Dark UI** - Clean, modern interface
+- **Activity Log** - Full audit trail of all courier actions
+- **Data Export** - Export courier data to CSV
+- **Delete Protection** - Safeguards against deleting delivered couriers
 
 ## 🛠️ Tech Stack
 
@@ -112,6 +115,12 @@ npx expo start --tunnel
 - **Edit** - Tap "Edit" to modify details
 - **Change Status** - Tap "Change Status" to update
 - **Delete** - Tap "Delete" to remove (with confirmation)
+- **Activity Log** - View full history of changes at the bottom
+
+### Export Data
+- Tap **"Export"** in the Courier List screen
+- Generates a CSV file of all couriers
+- Share or save the file instantly
 
 ## 📂 Project Structure
 
@@ -168,6 +177,15 @@ couriers: {
   expectedDeliveryDate?: string
   createdAt: number
   updatedAt: number
+}
+
+logs: {
+  _id: Id<"logs">
+  courierId?: Id<"couriers">
+  trackingId: string
+  action: string
+  description: string
+  timestamp: number
 }
 ```
 
