@@ -1,5 +1,5 @@
 import React from 'react';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ConvexProvider, ConvexReactClient } from 'convex/react';
@@ -7,7 +7,17 @@ import { colors } from '../src/styles/theme';
 
 const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!);
 
+// Fix for web scroll position not resetting on navigation
 export default function RootLayout() {
+    const pathname = usePathname();
+
+    // Web scroll fix removed to resolve native crash
+    // React.useEffect(() => {
+    //     if (typeof window !== 'undefined') {
+    //         window.scrollTo(0, 0);
+    //     }
+    // }, [pathname]);
+
     return (
         <ConvexProvider client={convex}>
             <SafeAreaProvider>

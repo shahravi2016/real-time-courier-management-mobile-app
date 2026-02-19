@@ -46,6 +46,8 @@ export default function CourierDetailsScreen() {
         pickupAddress: '',
         deliveryAddress: '',
         notes: '',
+        weight: '',
+        distance: '',
     });
 
     const [editErrors, setEditErrors] = useState<Record<string, string>>({});
@@ -58,7 +60,10 @@ export default function CourierDetailsScreen() {
                 receiverPhone: courier.receiverPhone,
                 pickupAddress: courier.pickupAddress,
                 deliveryAddress: courier.deliveryAddress,
+                deliveryAddress: courier.deliveryAddress,
                 notes: courier.notes || '',
+                weight: courier.weight?.toString() || '',
+                distance: courier.distance?.toString() || '',
             });
             setEditErrors({});
             setIsEditing(true);
@@ -100,7 +105,13 @@ export default function CourierDetailsScreen() {
                 receiverPhone: editForm.receiverPhone.trim(),
                 pickupAddress: editForm.pickupAddress.trim(),
                 deliveryAddress: editForm.deliveryAddress.trim(),
+                deliveryAddress: editForm.deliveryAddress.trim(),
                 notes: editForm.notes.trim() || undefined,
+                weight: editForm.weight ? parseFloat(editForm.weight) : undefined,
+                distance: editForm.distance ? parseFloat(editForm.distance) : undefined,
+                price: (editForm.weight && editForm.distance)
+                    ? (parseFloat(editForm.weight) * 5 + parseFloat(editForm.distance) * 2 + 10)
+                    : undefined,
             });
             setIsEditing(false);
         } catch (error) {
@@ -263,6 +274,26 @@ export default function CourierDetailsScreen() {
                                 multiline
                             />
 
+                            <View style={globalStyles.row}>
+                                <View style={{ flex: 1 }}>
+                                    <FormInput
+                                        label="Weight (kg)"
+                                        value={editForm.weight}
+                                        onChangeText={(v) => setEditForm((p) => ({ ...p, weight: v }))}
+                                        keyboardType="numeric"
+                                    />
+                                </View>
+                                <View style={{ width: spacing.md }} />
+                                <View style={{ flex: 1 }}>
+                                    <FormInput
+                                        label="Distance (km)"
+                                        value={editForm.distance}
+                                        onChangeText={(v) => setEditForm((p) => ({ ...p, distance: v }))}
+                                        keyboardType="numeric"
+                                    />
+                                </View>
+                            </View>
+
                             <View style={styles.editButtons}>
                                 <Pressable
                                     style={[globalStyles.buttonSecondary, { flex: 1 }]}
@@ -319,6 +350,31 @@ export default function CourierDetailsScreen() {
                                     </View>
                                 </View>
                             )}
+
+                            <View style={styles.section}>
+                                <Text style={styles.sectionTitle}>Invoice & Billing</Text>
+                                <View style={globalStyles.card}>
+                                    {courier.price ? (
+                                        <>
+                                            <View style={globalStyles.spaceBetween}>
+                                                <Text style={styles.subValue}>Weight: {courier.weight} kg</Text>
+                                                <Text style={styles.subValue}>Distance: {courier.distance} km</Text>
+                                            </View>
+                                            <View style={[globalStyles.spaceBetween, { marginTop: spacing.sm }]}>
+                                                <Text style={styles.value}>Total: ${courier.price.toFixed(2)}</Text>
+                                                <Pressable
+                                                    onPress={() => router.push(`/couriers/${id}/invoice`)}
+                                                    style={{ padding: spacing.xs }}
+                                                >
+                                                    <Text style={{ color: colors.primary, fontWeight: '600' }}>View Invoice &rarr;</Text>
+                                                </Pressable>
+                                            </View>
+                                        </>
+                                    ) : (
+                                        <Text style={styles.subValue}>Add weight and distance to generate invoice</Text>
+                                    )}
+                                </View>
+                            </View>
 
                             <View style={styles.section}>
                                 <Text style={styles.sectionTitle}>Timestamps</Text>

@@ -43,9 +43,21 @@ export const getStats = query({
             outForDelivery: all.filter((c) => c.currentStatus === "out_for_delivery").length,
             delivered: all.filter((c) => c.currentStatus === "delivered").length,
             cancelled: all.filter((c) => c.currentStatus === "cancelled").length,
+            revenue: all.reduce((sum, c) => sum + (c.price || 0), 0),
         };
 
         return stats;
+    },
+});
+
+// Get recent couriers for dashboard
+export const getRecent = query({
+    args: {},
+    handler: async (ctx) => {
+        return await ctx.db
+            .query("couriers")
+            .order("desc")
+            .take(5);
     },
 });
 
@@ -115,6 +127,9 @@ export const create = mutation({
         deliveryAddress: v.string(),
         notes: v.optional(v.string()),
         expectedDeliveryDate: v.optional(v.string()),
+        weight: v.optional(v.number()),
+        distance: v.optional(v.number()),
+        price: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
         const now = Date.now();
@@ -130,6 +145,9 @@ export const create = mutation({
             currentStatus: "pending",
             notes: args.notes,
             expectedDeliveryDate: args.expectedDeliveryDate,
+            weight: args.weight,
+            distance: args.distance,
+            price: args.price,
             createdAt: now,
             updatedAt: now,
         });
@@ -158,6 +176,9 @@ export const update = mutation({
         deliveryAddress: v.optional(v.string()),
         notes: v.optional(v.string()),
         expectedDeliveryDate: v.optional(v.string()),
+        weight: v.optional(v.number()),
+        distance: v.optional(v.number()),
+        price: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
         const { id, ...updates } = args;

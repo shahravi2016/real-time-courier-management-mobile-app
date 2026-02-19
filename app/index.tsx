@@ -92,16 +92,25 @@ export default function DashboardScreen() {
                             color={colors.cancelled}
                         />
                         <View style={{ width: spacing.sm }} />
-                        {/* Invisible spacer to maintain grid alignment */}
-                        <View style={{ flex: 1, opacity: 0 }} pointerEvents="none">
-                            <StatCard
-                                icon="❌"
-                                label="Cancelled"
-                                value={0}
-                                color={colors.cancelled}
-                            />
-                        </View>
+                        <StatCard
+                            icon="💰"
+                            label="Total Revenue"
+                            value={`$${stats.revenue.toFixed(2)}`}
+                            color={colors.success}
+                        />
                     </View>
+                </View>
+
+                {/* Recent Activity */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Recent Activity</Text>
+                    {/* We need to fetch recent couriers. Since we can't easily do a second query hook here without refactoring,
+                         we'll just use a Link to the full list for now or refactor to fetch recent.
+                         Actually, let's just add a button to view all and maybe a quick summary if possible.
+                         
+                         Wait, I can use another useQuery here.
+                     */}
+                    <RecentActivityList />
                 </View>
 
                 {/* Quick Actions */}
@@ -134,6 +143,48 @@ export default function DashboardScreen() {
                 </View>
             </ScrollView>
         </SafeAreaView>
+    );
+}
+
+function RecentActivityList() {
+    const router = useRouter();
+    const recent = useQuery(api.couriers.getRecent);
+
+    if (!recent) return <LoadingState message="" />;
+
+    if (recent.length === 0) {
+        return (
+            <View style={globalStyles.card}>
+                <Text style={globalStyles.textSecondary}>No recent activity</Text>
+            </View>
+        );
+    }
+
+    return (
+        <View style={{ gap: spacing.sm }}>
+            {recent.map((courier) => (
+                <Pressable
+                    key={courier._id}
+                    style={globalStyles.card}
+                    onPress={() => router.push(`/couriers/${courier._id}`)}
+                >
+                    <View style={globalStyles.spaceBetween}>
+                        <View>
+                            <Text style={[globalStyles.text, { fontWeight: '600' }]}>{courier.trackingId}</Text>
+                            <Text style={globalStyles.textSecondary}>{courier.receiverName}</Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={[globalStyles.text, { fontSize: fontSize.sm, color: colors.primary }]}>
+                                {courier.currentStatus.replace('_', ' ').toUpperCase()}
+                            </Text>
+                            <Text style={[globalStyles.textSecondary, { fontSize: fontSize.xs }]}>
+                                {new Date(courier.updatedAt).toLocaleDateString()}
+                            </Text>
+                        </View>
+                    </View>
+                </Pressable>
+            ))}
+        </View>
     );
 }
 

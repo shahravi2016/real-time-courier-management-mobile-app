@@ -107,22 +107,25 @@ export default function CourierListScreen() {
     }
 
     return (
-        <SafeAreaView style={globalStyles.safeArea} edges={['bottom']}>
-            <Stack.Screen
-                options={{
-                    title: 'Couriers',
-                    headerRight: () => (
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Pressable onPress={handleExport} style={{ marginRight: spacing.md }}>
-                                <Text style={styles.headerButton}>Export</Text>
-                            </Pressable>
-                            <Pressable onPress={() => router.push('/couriers/add')}>
-                                <Text style={styles.headerButton}>+ Add</Text>
-                            </Pressable>
-                        </View>
-                    ),
-                }}
-            />
+        <SafeAreaView style={globalStyles.safeArea}>
+            <Stack.Screen options={{ headerShown: false }} />
+
+            <View style={styles.header}>
+                <View style={globalStyles.row}>
+                    <Pressable onPress={() => router.back()} style={{ marginRight: spacing.sm }}>
+                        <Text style={styles.backButton}>←</Text>
+                    </Pressable>
+                    <Text style={globalStyles.title}>Couriers</Text>
+                </View>
+                <View style={globalStyles.row}>
+                    <Pressable onPress={handleExport} style={{ marginRight: spacing.lg }}>
+                        <Text style={styles.headerButton}>Export</Text>
+                    </Pressable>
+                    <Pressable onPress={() => router.push('/couriers/add')}>
+                        <Text style={styles.headerButton}>+ Add</Text>
+                    </Pressable>
+                </View>
+            </View>
 
             <View style={styles.container}>
                 {/* Search Bar */}
@@ -191,6 +194,19 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         paddingHorizontal: spacing.md,
+    },
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.md,
+        marginBottom: spacing.sm,
+    },
+    backButton: {
+        fontSize: fontSize.xl,
+        color: colors.text,
+        marginRight: spacing.sm,
     },
     headerButton: {
         color: colors.primary,

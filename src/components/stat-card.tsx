@@ -5,7 +5,7 @@ import { colors, spacing, fontSize } from '../styles/theme';
 interface StatCardProps {
     icon: string;
     label: string;
-    value: number;
+    value: number | string;
     color?: string;
 }
 

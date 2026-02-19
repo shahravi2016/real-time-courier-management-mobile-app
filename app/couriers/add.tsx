@@ -5,7 +5,7 @@ import { useRouter, Stack } from 'expo-router';
 import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { FormInput, LoadingState } from '../../src/components';
-import { colors, spacing, globalStyles } from '../../src/styles/theme';
+import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 
 export default function AddCourierScreen() {
     const router = useRouter();
@@ -85,8 +85,16 @@ export default function AddCourierScreen() {
     }
 
     return (
-        <SafeAreaView style={globalStyles.safeArea} edges={['bottom']}>
-            <Stack.Screen options={{ title: 'Add Courier' }} />
+        <SafeAreaView style={globalStyles.safeArea}>
+            <Stack.Screen options={{ headerShown: false }} />
+
+            <View style={styles.header}>
+                <Pressable onPress={() => router.back()} style={styles.backButton}>
+                    <Text style={styles.headerBackText}>←</Text>
+                </Pressable>
+                <Text style={styles.headerTitle}>Add Courier</Text>
+                <View style={{ width: 24 }} />
+            </View>
 
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -181,5 +189,28 @@ const styles = StyleSheet.create({
     buttonPressed: {
         opacity: 0.8,
         transform: [{ scale: 0.98 }],
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.md,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+        backgroundColor: colors.background,
+    },
+    backButton: {
+        padding: spacing.xs,
+        marginLeft: -spacing.xs,
+    },
+    headerBackText: {
+        fontSize: fontSize.xl,
+        color: colors.text,
+    },
+    headerTitle: {
+        fontSize: fontSize.lg,
+        fontWeight: '600',
+        color: colors.text,
     },
 });
