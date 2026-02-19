@@ -2,17 +2,19 @@ import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, Pressable, Text, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
-import { useMutation } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { FormInput, LoadingState } from '../../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { Id } from '../../convex/_generated/dataModel';
 
 const PAYMENT_METHODS = ['cash', 'card', 'prepaid'] as const;
 
 export default function AddCourierScreen() {
     const router = useRouter();
     const createCourier = useMutation(api.couriers.create);
+    const branches = useQuery(api.branches.list);
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [form, setForm] = useState({
@@ -26,6 +28,7 @@ export default function AddCourierScreen() {
         distance: '',
         expectedDeliveryDate: '',
         paymentMethod: 'cash' as 'cash' | 'card' | 'prepaid',
+        branchId: '' as string,
     });
     const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -61,6 +64,27 @@ export default function AddCourierScreen() {
         if (!form.pickupAddress.trim()) newErrors.pickupAddress = 'Pickup address is required';
         if (!form.deliveryAddress.trim()) newErrors.deliveryAddress = 'Delivery address is required';
 
+        // Robust numeric validation
+        const w = parseFloat(form.weight);
+        if (isNaN(w) || w <= 0) {
+            newErrors.weight = 'Valid weight is required';
+        } else if (w > 500) {
+            newErrors.weight = 'Weight cannot exceed 500kg';
+        }
+
+        const d = parseFloat(form.distance);
+        if (isNaN(d) || d <= 0) {
+            newErrors.distance = 'Valid distance is required';
+        } else if (d > 2000) {
+            newErrors.distance = 'Distance cannot exceed 2000km';
+        }
+
+        // Branch validation
+        if (branches && branches.length > 0 && !form.branchId) {
+            newErrors.branch = 'Please select a branch hub';
+            Alert.alert('Selection Required', 'Please select a branch hub for this courier.');
+        }
+
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
@@ -73,7 +97,7 @@ export default function AddCourierScreen() {
             const w = parseFloat(form.weight) || undefined;
             const d = parseFloat(form.distance) || undefined;
 
-            await createCourier({
+            const courierId = await createCourier({
                 senderName: form.senderName.trim(),
                 receiverName: form.receiverName.trim(),
                 receiverPhone: form.receiverPhone.trim(),
@@ -85,7 +109,16 @@ export default function AddCourierScreen() {
                 price: calculatedPrice || undefined,
                 paymentMethod: form.paymentMethod,
                 expectedDeliveryDate: form.expectedDeliveryDate.trim() || undefined,
+                branchId: form.branchId ? (form.branchId as Id<'branches'>) : undefined,
             });
+
+            // Mock Notification for new order
+            const { triggerMockNotification } = require('../../src/utils/notifications');
+            triggerMockNotification(
+                'SMS',
+                form.receiverPhone,
+                `Shipment Alert! A new courier with ID ${courierId} has been created for you. Track it in our app.`
+            );
 
             Alert.alert('Success', 'Courier created successfully', [
                 { text: 'OK', onPress: () => router.replace('/couriers') },
@@ -111,17 +144,24 @@ export default function AddCourierScreen() {
             <Stack.Screen options={{ headerShown: false }} />
 
             <View style={styles.header}>
-                <Pressable onPress={() => router.back()} style={styles.backButton}>
+                <Pressable
+                    onPress={() => router.back()}
+                    style={({ pressed }) => [
+                        styles.backButtonContainer,
+                        pressed && { opacity: 0.6 }
+                    ]}
+                    hitSlop={15}
+                >
                     <Ionicons name="arrow-back" size={24} color={colors.text} />
                 </Pressable>
                 <Text style={styles.headerTitle}>New Courier</Text>
-                <View style={{ width: 24 }} />
+                <View style={{ width: 44 }} />
             </View>
 
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 style={{ flex: 1 }}
-                keyboardVerticalOffset={100}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
             >
                 <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
                     {/* Shipment Details */}
@@ -202,6 +242,7 @@ export default function AddCourierScreen() {
                                 onChangeText={(v) => updateField('weight', v)}
                                 placeholder="0.0"
                                 keyboardType="numeric"
+                                error={errors.weight}
                             />
                         </View>
                         <View style={{ width: spacing.md }} />
@@ -212,6 +253,7 @@ export default function AddCourierScreen() {
                                 onChangeText={(v) => updateField('distance', v)}
                                 placeholder="0.0"
                                 keyboardType="numeric"
+                                error={errors.distance}
                             />
                         </View>
                     </View>
@@ -242,6 +284,45 @@ export default function AddCourierScreen() {
                                 </Text>
                             </Pressable>
                         ))}
+                    </View>
+
+                    {/* Branch Selection */}
+                    <Text style={styles.sectionLabel}>Branch Assignment</Text>
+                    <View style={styles.branchContainer}>
+                        {branches && branches.length > 0 ? (
+                            <View style={styles.branchGrid}>
+                                {branches.map((branch) => (
+                                    <Pressable
+                                        key={branch._id}
+                                        style={[
+                                            styles.branchChip,
+                                            form.branchId === branch._id && styles.branchChipActive,
+                                            errors.branch && { borderColor: colors.error }
+                                        ]}
+                                        onPress={() => updateField('branchId', branch._id)}
+                                    >
+                                        <Ionicons
+                                            name="business-outline"
+                                            size={16}
+                                            color={form.branchId === branch._id ? '#fff' : colors.textSecondary}
+                                            style={{ marginRight: 6 }}
+                                        />
+                                        <Text style={[
+                                            styles.branchChipText,
+                                            form.branchId === branch._id && styles.branchChipTextActive
+                                        ]}>
+                                            {branch.name}
+                                        </Text>
+                                    </Pressable>
+                                ))}
+                            </View>
+                        ) : (
+                            <View style={styles.emptyBranch}>
+                                <Ionicons name="alert-circle-outline" size={20} color={colors.textMuted} />
+                                <Text style={styles.emptyBranchText}>No branches available. Add a branch in dashboard first.</Text>
+                            </View>
+                        )}
+                        {errors.branch && <Text style={styles.errorText}>{errors.branch}</Text>}
                     </View>
 
                     {/* Price Preview */}
@@ -348,6 +429,52 @@ const styles = StyleSheet.create({
         fontSize: fontSize.xs,
         color: colors.textMuted,
     },
+    branchContainer: {
+        marginBottom: spacing.lg,
+    },
+    branchGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: spacing.sm,
+    },
+    branchChip: {
+        paddingVertical: spacing.sm,
+        paddingHorizontal: spacing.md,
+        borderRadius: 10,
+        backgroundColor: colors.surface,
+        borderWidth: 1,
+        borderColor: colors.border,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    branchChipActive: {
+        backgroundColor: colors.primary,
+        borderColor: colors.primary,
+    },
+    branchChipText: {
+        fontSize: fontSize.sm,
+        color: colors.textSecondary,
+    },
+    branchChipTextActive: {
+        color: '#fff',
+        fontWeight: '600',
+    },
+    emptyBranch: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: spacing.md,
+        backgroundColor: colors.surface,
+        borderRadius: 10,
+        borderStyle: 'dashed',
+        borderWidth: 1,
+        borderColor: colors.border,
+        gap: spacing.sm,
+    },
+    emptyBranchText: {
+        fontSize: fontSize.xs,
+        color: colors.textMuted,
+        flex: 1,
+    },
     submitButton: {
         backgroundColor: colors.primary,
         paddingVertical: spacing.md,
@@ -371,13 +498,25 @@ const styles = StyleSheet.create({
         borderBottomColor: colors.border,
         backgroundColor: colors.background,
     },
-    backButton: {
-        padding: spacing.xs,
-        marginLeft: -spacing.xs,
+    backButtonContainer: {
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.surface,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: colors.border,
     },
     headerTitle: {
         fontSize: fontSize.lg,
         fontWeight: '600',
         color: colors.text,
+    },
+    errorText: {
+        fontSize: fontSize.xs,
+        color: colors.error,
+        marginTop: spacing.xs,
+        fontWeight: '500',
     },
 });

@@ -3,50 +3,50 @@ import { StyleSheet, Platform } from 'react-native';
 // Enterprise Palette - Clean, Professional, High Contrast
 export const colors = {
     // Backgrounds
-    background: '#0F172A', // Slate 900
-    surface: '#1E293B',     // Slate 800
-    surfaceHighlight: '#334155', // Slate 700
-    surfaceElevated: '#273549',  // Between Slate 800 & 700
+    background: '#000000', // True Black
+    surface: '#121212',     // Dark Gray for depth
+    surfaceHighlight: '#1E1E1E',
+    surfaceElevated: '#1A1A1A',
 
     // Borders
-    border: '#334155',      // Slate 700
-    borderLight: '#475569', // Slate 600
+    border: '#2A2A2A',
+    borderLight: '#3A3A3A',
 
     // Text
-    text: '#F8FAFC',        // Slate 50
-    textSecondary: '#94A3B8', // Slate 400
-    textMuted: '#64748B',   // Slate 500
-    textInverse: '#0F172A', // Slate 900
+    text: '#FFFFFF',
+    textSecondary: '#A0A0A0',
+    textMuted: '#666666',
+    textInverse: '#000000',
 
     // Brand / Primary
-    primary: '#3B82F6',     // Blue 500
-    primaryDark: '#2563EB', // Blue 600
-    primaryLight: '#60A5FA', // Blue 400
+    primary: '#2563EB',
+    primaryDark: '#1E40AF',
+    primaryLight: '#60A5FA',
 
     // Semantic / Status
-    success: '#10B981',     // Emerald 500
+    success: '#10B981',
     successBg: 'rgba(16, 185, 129, 0.1)',
 
-    warning: '#F59E0B',     // Amber 500
+    warning: '#F59E0B',
     warningBg: 'rgba(245, 158, 11, 0.1)',
 
-    error: '#EF4444',       // Red 500
+    error: '#EF4444',
     errorBg: 'rgba(239, 68, 68, 0.1)',
 
-    info: '#06B6D4',        // Cyan 500
+    info: '#06B6D4',
     infoBg: 'rgba(6, 182, 212, 0.1)',
 
     // Specific Statuses
     pending: '#F59E0B',
-    pickedUp: '#8B5CF6',    // Violet 500
+    pickedUp: '#8B5CF6',
     inTransit: '#3B82F6',
     outForDelivery: '#06B6D4',
     delivered: '#10B981',
     cancelled: '#EF4444',
 
     // UI Elements
-    card: '#1E293B',
-    modalOverlay: 'rgba(15, 23, 42, 0.75)',
+    card: '#121212',
+    modalOverlay: 'rgba(0, 0, 0, 0.85)',
 };
 
 export const spacing = {

@@ -47,11 +47,13 @@ export const getById = query({
     },
 });
 
+const normalizePhone = (p: string) => p.replace(/\D/g, "");
+
 // Get couriers for specific user (Agent or Customer)
 export const getMyCouriers = query({
     args: {
         userId: v.id("users"),
-        role: v.union(v.literal("agent"), v.literal("customer")),
+        role: v.union(v.literal("admin"), v.literal("agent"), v.literal("customer")),
     },
     handler: async (ctx, args) => {
         if (args.role === "agent") {
@@ -60,13 +62,24 @@ export const getMyCouriers = query({
                 .withIndex("by_assignedTo", (q) => q.eq("assignedTo", args.userId))
                 .order("desc")
                 .collect();
+        } else if (args.role === "customer") {
+            // For customer: Fetch user to get their phone number
+            const user = await ctx.db.get(args.userId);
+            if (!user || !user.phone) return [];
+
+            const phone = normalizePhone(user.phone);
+
+            // Return couriers where user is sender or receiver
+            const all = await ctx.db.query("couriers").collect();
+
+            return all.filter(c => {
+                const rPhone = normalizePhone(c.receiverPhone);
+                const sPhone = normalizePhone((c as any).senderPhone || "");
+                return rPhone === phone || sPhone === phone || c.senderName === user.name;
+            })
+                .sort((a, b) => b.createdAt - a.createdAt);
         } else {
-            // For customer: return all couriers for demo purposes
-            // In production, filter by createdBy or senderName matching user
-            return await ctx.db
-                .query("couriers")
-                .order("desc")
-                .collect();
+            return [];
         }
     },
 });
@@ -85,10 +98,34 @@ export const getStats = query({
             outForDelivery: all.filter((c) => c.currentStatus === "out_for_delivery").length,
             delivered: all.filter((c) => c.currentStatus === "delivered").length,
             cancelled: all.filter((c) => c.currentStatus === "cancelled").length,
-            revenue: all.reduce((sum, c) => sum + (c.price || 0), 0),
+            revenue: all
+                .filter((c) => c.currentStatus === "delivered")
+                .reduce((sum, c) => sum + (c.price || 0), 0),
         };
 
         return stats;
+    },
+});
+
+// Get Agent specific stats
+export const getAgentStats = query({
+    args: { userId: v.id("users") },
+    handler: async (ctx, args) => {
+        const myJobs = await ctx.db
+            .query("couriers")
+            .withIndex("by_assignedTo", (q) => q.eq("assignedTo", args.userId))
+            .collect();
+
+        const completed = myJobs.filter(j => j.currentStatus === "delivered");
+
+        return {
+            totalJobs: myJobs.length,
+            activeJobs: myJobs.filter(j => !["delivered", "cancelled"].includes(j.currentStatus)).length,
+            completedJobs: completed.length,
+            // Assuming 20% commission for the agent for demo purposes
+            earnings: completed.reduce((sum, j) => sum + ((j.price || 0) * 0.2), 0),
+            target: 50, // Mock target
+        };
     },
 });
 
@@ -100,6 +137,33 @@ export const getRecent = query({
             .query("couriers")
             .order("desc")
             .take(5);
+    },
+});
+
+// Get Customer specific stats
+export const getCustomerStats = query({
+    args: { userId: v.id("users") },
+    handler: async (ctx, args) => {
+        const user = await ctx.db.get(args.userId);
+        if (!user || !user.phone) {
+            return { inTransit: 0, delivered: 0, pending: 0, total: 0 };
+        }
+
+        const phone = normalizePhone(user.phone);
+        const all = await ctx.db.query("couriers").collect();
+        // Return couriers where user is sender or receiver
+        const myParcels = all.filter(c => {
+            const rPhone = normalizePhone(c.receiverPhone);
+            const sPhone = normalizePhone((c as any).senderPhone || "");
+            return rPhone === phone || sPhone === phone || c.senderName === user.name;
+        });
+
+        return {
+            inTransit: myParcels.filter(c => c.currentStatus === "in_transit" || c.currentStatus === "out_for_delivery").length,
+            delivered: myParcels.filter(c => c.currentStatus === "delivered").length,
+            pending: myParcels.filter(c => c.currentStatus === "pending" || c.currentStatus === "picked_up").length,
+            total: myParcels.length,
+        };
     },
 });
 
@@ -172,6 +236,7 @@ export const create = mutation({
         distance: v.optional(v.number()),
         price: v.optional(v.number()),
         paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("prepaid"))),
+        branchId: v.optional(v.id("branches")),
     },
     handler: async (ctx, args) => {
         const now = Date.now();
@@ -192,6 +257,7 @@ export const create = mutation({
             price: args.price,
             paymentStatus: "pending",
             paymentMethod: args.paymentMethod || "cash",
+            branchId: args.branchId,
             createdAt: now,
             updatedAt: now,
         });
@@ -225,6 +291,7 @@ export const update = mutation({
         price: v.optional(v.number()),
         paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("prepaid"))),
         paymentStatus: v.optional(v.union(v.literal("paid"), v.literal("unpaid"), v.literal("pending"))),
+        branchId: v.optional(v.id("branches")),
     },
     handler: async (ctx, args) => {
         const { id, ...updates } = args;
@@ -295,6 +362,11 @@ export const completeDelivery = mutation({
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
         if (!courier) throw new Error("Courier not found");
+
+        // Auth check: If it's a mutation call, we usually check auth via ctx.auth 
+        // but since we are using explicit userID in some cases or simple roles:
+        // For POD, we assume the frontend sends the user identity.
+        // We'll trust the assignment check for now or add a userId to args for strict check.
 
         const podId = await ctx.db.insert("proofOfDelivery", {
             courierId: args.id,
@@ -384,6 +456,9 @@ export const updateStatus = mutation({
             description: `Status changed: ${formatStatus(oldStatus)} → ${formatStatus(args.status)}`,
             timestamp: Date.now(),
         });
+
+        // Mock: Trigger notifications (SMS/Email)
+        // console.log(`Notifying receiver: Your package ${courier.trackingId} is now ${args.status}`);
     },
 });
 

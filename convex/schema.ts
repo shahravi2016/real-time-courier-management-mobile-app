@@ -28,6 +28,7 @@ export default defineSchema({
         paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("prepaid"))),
 
         assignedTo: v.optional(v.id("users")), // Agent ID
+        branchId: v.optional(v.id("branches")), // Branch ID
 
         // References
         invoiceId: v.optional(v.id("invoices")),
@@ -39,7 +40,17 @@ export default defineSchema({
         .index("by_trackingId", ["trackingId"])
         .index("by_status", ["currentStatus"])
         .index("by_createdAt", ["createdAt"])
-        .index("by_assignedTo", ["assignedTo"]),
+        .index("by_assignedTo", ["assignedTo"])
+        .index("by_branchId", ["branchId"]),
+
+    branches: defineTable({
+        name: v.string(),
+        address: v.string(),
+        phone: v.optional(v.string()),
+        managerId: v.optional(v.id("users")),
+        createdAt: v.number(),
+    })
+        .index("by_name", ["name"]),
 
     users: defineTable({
         name: v.string(),

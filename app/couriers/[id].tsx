@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
-import { View, ScrollView, StyleSheet, Pressable, Text, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, ScrollView, StyleSheet, Pressable, Text, Modal, KeyboardAvoidingView, Platform, Alert, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
-import { StatusBadge, FormInput, LoadingState, ErrorState, ActivityLog } from '../../src/components';
-import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
+import { StatusBadge, FormInput, ActivityLog, SignaturePad } from '../../src/components';
+import { colors, spacing, fontSize, globalStyles, borderRadius } from '../../src/styles/theme';
+import { LoadingState, EmptyState, ErrorState } from '../../src/components';
+import { useAuth } from '../../src/components/auth-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 
 type CourierStatus =
     | 'pending'
@@ -29,16 +32,38 @@ const statusOptions: { label: string; value: CourierStatus }[] = [
 export default function CourierDetailsScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
+    const { user } = useAuth();
 
     const courier = useQuery(api.couriers.getById, { id: id as Id<'couriers'> });
+    const agents = useQuery(api.users.listAgents);
+    const isAdmin = user?.role === 'admin';
+    const isCustomer = user?.role === 'customer';
+    const isAssignedToMe = courier?.assignedTo === user?._id;
+    const isMyParcel = isCustomer && (
+        courier?.receiverPhone === user?.phone ||
+        (courier as any).senderPhone === user?.phone ||
+        courier?.senderName === user?.name
+    );
+    const canManageStatus = isAdmin || isAssignedToMe;
+
     const updateCourier = useMutation(api.couriers.update);
     const updateStatus = useMutation(api.couriers.updateStatus);
     const removeCourier = useMutation(api.couriers.remove);
+    const completeDelivery = useMutation(api.couriers.completeDelivery);
+    const assignCourier = useMutation(api.couriers.assignCourier);
 
     const [isEditing, setIsEditing] = useState(false);
     const [showStatusModal, setShowStatusModal] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [showPodModal, setShowPodModal] = useState(false);
+    const [showAgentModal, setShowAgentModal] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const [podForm, setPodForm] = useState({
+        signeeName: '',
+        signature: null as string | null,
+        photo: null as string | null,
+    });
     const [editForm, setEditForm] = useState({
         senderName: '',
         receiverName: '',
@@ -87,6 +112,21 @@ export default function CourierDetailsScreen() {
         if (!editForm.pickupAddress.trim()) newErrors.pickupAddress = 'Pickup address is required';
         if (!editForm.deliveryAddress.trim()) newErrors.deliveryAddress = 'Delivery address is required';
 
+        // Robust numeric validation for editing
+        const w = parseFloat(editForm.weight);
+        if (isNaN(w) || w <= 0) {
+            newErrors.weight = 'Valid weight is required';
+        } else if (w > 500) {
+            newErrors.weight = 'Weight cannot exceed 500kg';
+        }
+
+        const d = parseFloat(editForm.distance);
+        if (isNaN(d) || d <= 0) {
+            newErrors.distance = 'Valid distance is required';
+        } else if (d > 2000) {
+            newErrors.distance = 'Distance cannot exceed 2000km';
+        }
+
         setEditErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
@@ -126,8 +166,33 @@ export default function CourierDetailsScreen() {
         setIsSubmitting(true);
         try {
             await updateStatus({ id: courier._id, status });
+
+            // Mock Notification
+            const { notifyStatusChange } = require('../../src/utils/notifications');
+            notifyStatusChange(
+                courier.trackingId,
+                status,
+                courier.receiverPhone,
+                courier.senderName
+            );
+
         } catch (error) {
             console.error('Failed to update status:', error);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleAssignAgent = async (agentId: Id<'users'>) => {
+        if (!courier) return;
+        setShowAgentModal(false);
+        setIsSubmitting(true);
+        try {
+            await assignCourier({ id: courier._id, userId: agentId });
+            Alert.alert('Success', 'Courier assigned to agent');
+        } catch (error) {
+            console.error('Failed to assign agent:', error);
+            Alert.alert('Error', 'Failed to assign agent');
         } finally {
             setIsSubmitting(false);
         }
@@ -151,20 +216,105 @@ export default function CourierDetailsScreen() {
         }
     };
 
+    const handleTakePhoto = async () => {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+            Alert.alert('Permission denied', 'Camera access is required for POD photo');
+            return;
+        }
+
+        const result = await ImagePicker.launchCameraAsync({
+            quality: 0.7,
+            allowsEditing: true,
+        });
+
+        if (!result.canceled) {
+            setPodForm(p => ({ ...p, photo: result.assets[0].uri }));
+        }
+    };
+
+    const handlePodSubmit = async () => {
+        if (!podForm.signeeName.trim()) {
+            Alert.alert('Incomplete Form', 'Please enter the receiver\'s name.');
+            return;
+        }
+        if (!podForm.signature) {
+            Alert.alert('Required', 'Signature is mandatory for Proof of Delivery.');
+            return;
+        }
+
+        // Final sanity check
+        if (podForm.signeeName.length < 3) {
+            Alert.alert('Invalid Name', 'Signee name must be at least 3 characters.');
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
+            await completeDelivery({
+                id: courier!._id,
+                signeeName: podForm.signeeName,
+                signatureId: podForm.signature,
+                photoId: podForm.photo || undefined,
+            });
+            setShowPodModal(false);
+            Alert.alert('Success', 'Delivery confirmed with POD');
+        } catch (error) {
+            console.error('POD failure:', error);
+            Alert.alert('Error', 'Failed to submit POD');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     if (courier === undefined) {
         return (
             <SafeAreaView style={globalStyles.safeArea}>
-                <Stack.Screen options={{ title: 'Details' }} />
+                <Stack.Screen options={{ headerShown: false }} />
                 <LoadingState message="Loading courier..." />
             </SafeAreaView>
         );
     }
 
-    if (courier === null) {
+    if (!courier) {
         return (
             <SafeAreaView style={globalStyles.safeArea}>
-                <Stack.Screen options={{ title: 'Details' }} />
-                <ErrorState message="Courier not found" />
+                <Stack.Screen options={{ headerShown: false }} />
+                <View style={styles.header}>
+                    <Pressable onPress={() => router.back()} style={styles.backButtonContainer}>
+                        <Ionicons name="arrow-back" size={24} color={colors.text} />
+                    </Pressable>
+                    <Text style={styles.headerTitle}>Details</Text>
+                    <View style={{ width: 44 }} />
+                </View>
+                <EmptyState icon="🔍" title="Not Found" message="Courier does not exist." />
+            </SafeAreaView>
+        );
+    }
+
+    // For Agents: Only assigned agent can view
+    // For Customers: Only sender/receiver can view
+    if (!isAdmin && !isAssignedToMe && (!isCustomer || !isMyParcel) && user?.role === 'agent') {
+        return (
+            <SafeAreaView style={globalStyles.safeArea}>
+                <Stack.Screen options={{ headerShown: false }} />
+                <View style={styles.header}>
+                    <Pressable onPress={() => router.back()} style={styles.backButtonContainer}>
+                        <Ionicons name="arrow-back" size={24} color={colors.text} />
+                    </Pressable>
+                    <Text style={styles.headerTitle}>Access Denied</Text>
+                    <View style={{ width: 44 }} />
+                </View>
+                <View style={styles.unauthorizedContainer}>
+                    <Ionicons name="lock-closed-outline" size={64} color={colors.error} />
+                    <Text style={styles.unauthorizedTitle}>Unauthorized Access</Text>
+                    <Text style={styles.unauthorizedText}>
+                        You are not assigned to this courier. Only assigned agents and admins can view these details.
+                    </Text>
+                    <Pressable style={styles.backHomeButton} onPress={() => router.replace('/')}>
+                        <Text style={styles.backHomeButtonText}>Back to Home</Text>
+                    </Pressable>
+                </View>
             </SafeAreaView>
         );
     }
@@ -172,8 +322,8 @@ export default function CourierDetailsScreen() {
     if (isSubmitting) {
         return (
             <SafeAreaView style={globalStyles.safeArea}>
-                <Stack.Screen options={{ title: 'Details' }} />
-                <LoadingState message="Updating..." />
+                <Stack.Screen options={{ headerShown: false }} />
+                <LoadingState message="Wait a moment..." />
             </SafeAreaView>
         );
     }
@@ -182,33 +332,47 @@ export default function CourierDetailsScreen() {
     const formattedUpdated = new Date(courier.updatedAt).toLocaleString();
 
 
-
     return (
         <SafeAreaView style={globalStyles.safeArea}>
-            <Stack.Screen options={{ headerShown: false }} />
-
-            {/* Custom Header */}
+            {/* Header */}
             <View style={styles.header}>
-                <Pressable onPress={() => router.back()} style={styles.backButton}>
+                <Pressable
+                    onPress={() => router.back()}
+                    style={({ pressed }) => [
+                        styles.backButtonContainer,
+                        pressed && { opacity: 0.6 }
+                    ]}
+                    hitSlop={15}
+                >
                     <Ionicons name="arrow-back" size={24} color={colors.text} />
                 </Pressable>
-                <Text style={styles.headerTitle}>{courier.trackingId}</Text>
-                <View style={{ width: 40 }} />
+                <Text style={styles.headerTitle}>Courier Details</Text>
+                <View style={styles.headerActions}>
+                    {canManageStatus && (
+                        <Pressable onPress={() => setShowStatusModal(true)} style={styles.actionIconButton}>
+                            <Ionicons name="ellipsis-vertical" size={22} color={colors.primary} />
+                        </Pressable>
+                    )}
+                </View>
             </View>
 
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 style={{ flex: 1 }}
-                keyboardVerticalOffset={100}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
             >
                 <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
                     {/* Status Section */}
                     <View style={styles.statusSection}>
                         <StatusBadge status={courier.currentStatus} />
-                        <Pressable style={styles.statusButton} onPress={() => setShowStatusModal(true)}>
-                            <Text style={styles.statusButtonText}>Change Status</Text>
-                        </Pressable>
                     </View>
+
+                    {courier.branchId && (
+                        <View style={styles.branchHeader}>
+                            <Ionicons name="business" size={14} color={colors.textSecondary} />
+                            <Text style={styles.branchHeaderText}>Assigned to Branch</Text>
+                        </View>
+                    )}
 
                     {isEditing ? (
                         /* Edit Mode */
@@ -304,13 +468,69 @@ export default function CourierDetailsScreen() {
                                     style={[globalStyles.button, { flex: 1 }]}
                                     onPress={handleSaveEdit}
                                 >
-                                    <Text style={globalStyles.buttonText}>Save</Text>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                        <Ionicons name="save-outline" size={20} color="#fff" />
+                                        <Text style={globalStyles.buttonText}>Save Changes</Text>
+                                    </View>
                                 </Pressable>
                             </View>
                         </View>
                     ) : (
                         /* View Mode */
                         <>
+                            {/* Primary Actions */}
+                            {!isCustomer && (
+                                <View style={styles.actionsContainer}>
+                                    {isAdmin && (
+                                        <Pressable
+                                            style={[styles.actionButton, styles.assignButton]}
+                                            onPress={() => setShowAgentModal(true)}
+                                        >
+                                            <Ionicons name="person-add-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                                            <Text style={styles.actionButtonText}>Assign Agent</Text>
+                                        </Pressable>
+                                    )}
+
+                                    {canManageStatus && courier.currentStatus !== 'delivered' && courier.currentStatus !== 'cancelled' && (
+                                        <Pressable
+                                            style={styles.actionButton}
+                                            onPress={() => {
+                                                if (courier.currentStatus === 'out_for_delivery') {
+                                                    setShowPodModal(true);
+                                                } else {
+                                                    setShowStatusModal(true);
+                                                }
+                                            }}
+                                        >
+                                            <Ionicons
+                                                name={courier.currentStatus === 'out_for_delivery' ? "checkbox-outline" : "sync-outline"}
+                                                size={20}
+                                                color="#fff"
+                                                style={{ marginRight: 8 }}
+                                            />
+                                            <Text style={styles.actionButtonText}>
+                                                {courier.currentStatus === 'out_for_delivery' ? 'Proof of Delivery' : 'Update Status'}
+                                            </Text>
+                                        </Pressable>
+                                    )}
+                                </View>
+                            )}
+
+                            {/* Secondary Actions (Edit/Delete) - Admin Only */}
+                            {isAdmin && (
+                                <View style={styles.secondaryActions}>
+                                    <Pressable style={styles.secondaryAction} onPress={() => setIsEditing(true)}>
+                                        <Ionicons name="create-outline" size={18} color={colors.primary} style={{ marginRight: 6 }} />
+                                        <Text style={[styles.secondaryActionText, { color: colors.primary }]}>Edit Details</Text>
+                                    </Pressable>
+                                    <View style={styles.divider} />
+                                    <Pressable style={styles.secondaryAction} onPress={handleDelete}>
+                                        <Ionicons name="trash-outline" size={18} color={colors.error} style={{ marginRight: 6 }} />
+                                        <Text style={[styles.secondaryActionText, { color: colors.error }]}>Delete Courier</Text>
+                                    </Pressable>
+                                </View>
+                            )}
+
                             <View style={styles.section}>
                                 <Text style={styles.sectionTitle}>Sender</Text>
                                 <View style={globalStyles.card}>
@@ -382,22 +602,22 @@ export default function CourierDetailsScreen() {
                                 </View>
                             </View>
 
-                            {/* Action Buttons */}
-                            <View style={styles.actions}>
-                                <Pressable
-                                    style={[globalStyles.buttonSecondary, { flex: 1 }]}
-                                    onPress={startEditing}
-                                >
-                                    <Text style={globalStyles.buttonText}>✏️ Edit</Text>
-                                </Pressable>
-                                <View style={{ width: spacing.sm }} />
-                                <Pressable
-                                    style={[globalStyles.buttonSecondary, styles.deleteButton, { flex: 1 }]}
-                                    onPress={handleDelete}
-                                >
-                                    <Text style={[globalStyles.buttonText, { color: colors.error }]}>🗑️ Delete</Text>
-                                </Pressable>
-                            </View>
+                            {courier.assignedTo && (
+                                <View style={[styles.section, { marginTop: spacing.md }]}>
+                                    <Text style={styles.sectionTitle}>Assigned Agent</Text>
+                                    <View style={[globalStyles.card, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
+                                        <View style={{ backgroundColor: colors.primary + '15', padding: 10, borderRadius: 25 }}>
+                                            <Ionicons name="bicycle" size={24} color={colors.primary} />
+                                        </View>
+                                        <View>
+                                            <Text style={[styles.value, { fontWeight: '700' }]}>
+                                                {agents?.find(a => a._id === courier.assignedTo)?.name || "Delivery Agent"}
+                                            </Text>
+                                            <Text style={styles.subValue}>Platform ID: {courier.assignedTo}</Text>
+                                        </View>
+                                    </View>
+                                </View>
+                            )}
 
                             {/* Activity Log */}
                             <ActivityLog courierId={courier._id} />
@@ -405,6 +625,60 @@ export default function CourierDetailsScreen() {
                     )}
                 </ScrollView>
             </KeyboardAvoidingView>
+
+            {/* Proof of Delivery Modal */}
+            <Modal
+                visible={showPodModal}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowPodModal(false)}
+            >
+                <View style={styles.podOverlay}>
+                    <View style={styles.podContent}>
+                        <View style={styles.podHeader}>
+                            <Text style={styles.podTitle}>Delivery Confirmation</Text>
+                            <Pressable onPress={() => setShowPodModal(false)}>
+                                <Ionicons name="close" size={24} color={colors.text} />
+                            </Pressable>
+                        </View>
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            <FormInput
+                                label="Receiver Name"
+                                placeholder="Who is receiving?"
+                                value={podForm.signeeName}
+                                onChangeText={(v) => setPodForm(p => ({ ...p, signeeName: v }))}
+                            />
+
+                            <Text style={styles.podLabel}>Signature</Text>
+                            <SignaturePad
+                                onOK={(sig) => setPodForm(p => ({ ...p, signature: sig }))}
+                                onEmpty={() => setPodForm(p => ({ ...p, signature: null }))}
+                            />
+
+                            <Pressable
+                                style={[styles.photoButton, podForm.photo && styles.photoButtonActive]}
+                                onPress={handleTakePhoto}
+                            >
+                                <Ionicons
+                                    name={podForm.photo ? "checkmark-circle" : "camera-outline"}
+                                    size={20}
+                                    color={podForm.photo ? colors.success : colors.primary}
+                                />
+                                <Text style={[styles.photoButtonText, podForm.photo && { color: colors.success }]}>
+                                    {podForm.photo ? "Photo Captured" : "Take POD Photo (Optional)"}
+                                </Text>
+                            </Pressable>
+
+                            <Pressable
+                                style={[globalStyles.button, styles.podSubmit]}
+                                onPress={handlePodSubmit}
+                            >
+                                <Text style={globalStyles.buttonText}>Confirm Delivery</Text>
+                            </Pressable>
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
 
             {/* Status Change Modal */}
             <Modal
@@ -438,6 +712,57 @@ export default function CourierDetailsScreen() {
                         <Pressable
                             style={[globalStyles.buttonSecondary, styles.modalCancel]}
                             onPress={() => setShowStatusModal(false)}
+                        >
+                            <Text style={globalStyles.buttonText}>Cancel</Text>
+                        </Pressable>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Agent Selection Modal */}
+            <Modal
+                visible={showAgentModal}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowAgentModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Assign Delivery Agent</Text>
+                            <Pressable onPress={() => setShowAgentModal(false)}>
+                                <Ionicons name="close" size={24} color={colors.text} />
+                            </Pressable>
+                        </View>
+
+                        <FlatList
+                            data={agents}
+                            keyExtractor={(item) => item._id}
+                            style={{ maxHeight: 400 }}
+                            renderItem={({ item }) => (
+                                <Pressable
+                                    style={styles.agentOption}
+                                    onPress={() => handleAssignAgent(item._id)}
+                                >
+                                    <View style={styles.agentAvatar}>
+                                        <Text style={styles.agentAvatarText}>{item.name.charAt(0)}</Text>
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.agentName}>{item.name}</Text>
+                                        <Text style={styles.agentEmail}>{item.email}</Text>
+                                    </View>
+                                    <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                                </Pressable>
+                            )}
+                            ListEmptyComponent={
+                                <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                                    <Text style={{ color: colors.textMuted }}>No delivery agents found</Text>
+                                </View>
+                            }
+                        />
+                        <Pressable
+                            style={[globalStyles.buttonSecondary, styles.modalCancel]}
+                            onPress={() => setShowAgentModal(false)}
                         >
                             <Text style={globalStyles.buttonText}>Cancel</Text>
                         </Pressable>
@@ -565,9 +890,6 @@ const styles = StyleSheet.create({
     },
     statusOptionActive: {
         backgroundColor: colors.primary,
-        fontSize: fontSize.md,
-        color: colors.text,
-        textAlign: 'center',
     },
     statusOptionText: {
         fontSize: fontSize.md,
@@ -576,6 +898,7 @@ const styles = StyleSheet.create({
     },
     statusOptionTextActive: {
         fontWeight: '600',
+        color: '#fff',
     },
     modalCancel: {
         marginTop: spacing.md,
@@ -627,5 +950,221 @@ const styles = StyleSheet.create({
         fontSize: fontSize.lg,
         fontWeight: '600',
         color: colors.text,
+    },
+    branchHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 4,
+        backgroundColor: colors.surface,
+        borderRadius: 4,
+        alignSelf: 'flex-start',
+        marginBottom: spacing.md,
+        gap: 6,
+    },
+    branchHeaderText: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: colors.textSecondary,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    podOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        justifyContent: 'flex-end',
+    },
+    podContent: {
+        backgroundColor: colors.background,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        padding: spacing.lg,
+        height: '85%',
+    },
+    podHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: spacing.lg,
+    },
+    podTitle: {
+        fontSize: fontSize.xl,
+        fontWeight: 'bold',
+        color: colors.text,
+    },
+    podLabel: {
+        fontSize: fontSize.sm,
+        fontWeight: '600',
+        color: colors.textSecondary,
+        marginTop: spacing.md,
+        marginBottom: spacing.xs,
+    },
+    photoButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: spacing.md,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: colors.primary,
+        borderStyle: 'dashed',
+        marginTop: spacing.lg,
+        gap: 8,
+    },
+    photoButtonActive: {
+        borderColor: colors.success,
+        backgroundColor: colors.success + '10',
+    },
+    photoButtonText: {
+        color: colors.primary,
+        fontWeight: '600',
+    },
+    podSubmit: {
+        marginTop: spacing.xl,
+        marginBottom: spacing.xl,
+    },
+    backButtonContainer: {
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.surface,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    assignButton: {
+        backgroundColor: (colors as any).success || '#27ae60',
+    },
+    actionsContainer: {
+        flexDirection: 'row',
+        gap: spacing.sm,
+        marginBottom: spacing.lg,
+    },
+    actionButton: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.primary,
+        paddingVertical: spacing.md,
+        borderRadius: 12,
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+    },
+    actionButtonText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: fontSize.md,
+    },
+    secondaryActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.surface,
+        borderRadius: 12,
+        padding: spacing.sm,
+        marginBottom: spacing.xl,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    secondaryAction: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: spacing.sm,
+    },
+    secondaryActionText: {
+        fontSize: fontSize.sm,
+        fontWeight: '600',
+    },
+    divider: {
+        width: 1,
+        height: 20,
+        backgroundColor: colors.border,
+    },
+    headerActions: {
+        width: 44,
+        alignItems: 'flex-end',
+    },
+    actionIconButton: {
+        width: 40,
+        height: 40,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: spacing.lg,
+    },
+    agentOption: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: spacing.md,
+        backgroundColor: colors.surface,
+        borderRadius: 12,
+        marginBottom: spacing.sm,
+        borderWidth: 1,
+        borderColor: colors.border,
+        gap: 12,
+    },
+    agentAvatar: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    agentAvatarText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 16,
+    },
+    agentName: {
+        fontSize: fontSize.md,
+        fontWeight: '600',
+        color: colors.text,
+    },
+    agentEmail: {
+        fontSize: fontSize.xs,
+        color: colors.textSecondary,
+    },
+    unauthorizedContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: spacing.xl,
+        gap: spacing.md,
+    },
+    unauthorizedTitle: {
+        fontSize: fontSize.xl,
+        fontWeight: 'bold',
+        color: colors.text,
+        textAlign: 'center',
+    },
+    unauthorizedText: {
+        fontSize: fontSize.md,
+        color: colors.textSecondary,
+        textAlign: 'center',
+        lineHeight: 24,
+    },
+    backHomeButton: {
+        marginTop: spacing.lg,
+        backgroundColor: colors.primary,
+        paddingVertical: spacing.md,
+        paddingHorizontal: spacing.xl,
+        borderRadius: 12,
+    },
+    backHomeButtonText: {
+        color: '#fff',
+        fontSize: fontSize.md,
+        fontWeight: '600',
     },
 });

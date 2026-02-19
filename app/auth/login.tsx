@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Alert, TextInput, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useConvex } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 export default function LoginScreen() {
     const convex = useConvex();
     const { login } = useAuth();
+    const router = useRouter();
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -23,18 +24,29 @@ export default function LoginScreen() {
             return;
         }
 
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email.trim())) {
+            Alert.alert('Invalid Email', 'Please enter a valid email address.');
+            return;
+        }
+
+        if (password.length < 6) {
+            Alert.alert('Invalid Password', 'Password must be at least 6 characters.');
+            return;
+        }
+
         setIsSubmitting(true);
         try {
-            const user = await convex.query(api.auth.login, { email, password });
+            const user = await convex.query(api.auth.login, { email: email.trim(), password });
 
             if (user) {
                 await login(user as any);
             } else {
-                Alert.alert('Error', 'Invalid credentials');
+                Alert.alert('Login Failed', 'Invalid email or password. Please try again.');
             }
         } catch (error) {
             console.error(error);
-            Alert.alert('Error', 'Something went wrong');
+            Alert.alert('Connection Error', 'Unable to reach server. Please check your internet.');
         } finally {
             setIsSubmitting(false);
         }
@@ -115,7 +127,10 @@ export default function LoginScreen() {
                 </View>
 
                 <View style={styles.footer}>
-                    <Text style={styles.footerText}>Don't have an account? Contact Admin.</Text>
+                    <Text style={styles.footerText}>Don't have an account?</Text>
+                    <Pressable onPress={() => router.push('/auth/register')}>
+                        <Text style={styles.registerLink}>Create Account</Text>
+                    </Pressable>
                 </View>
             </View>
         </SafeAreaView>
@@ -203,5 +218,11 @@ const styles = StyleSheet.create({
     footerText: {
         color: colors.textMuted,
         fontSize: fontSize.sm,
+    },
+    registerLink: {
+        color: colors.primary,
+        fontSize: fontSize.sm,
+        fontWeight: '700',
+        marginTop: spacing.xs,
     },
 });

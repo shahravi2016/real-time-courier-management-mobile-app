@@ -5,3 +5,4 @@ export { FormInput } from './form-input';
 export { LoadingState, ErrorState, EmptyState } from './state-views';
 export * from './activity-log';
 export { AuthProvider, useAuth } from './auth-context';
+export { SignaturePad } from './signature-pad';

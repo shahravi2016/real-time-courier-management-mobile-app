@@ -8,6 +8,8 @@ import * as Sharing from 'expo-sharing';
 import { api } from '../../convex/_generated/api';
 import { CourierCard, LoadingState, EmptyState } from '../../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../../src/components/auth-context';
 
 type CourierStatus =
     | 'pending'
@@ -32,7 +34,15 @@ export default function CourierListScreen() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedFilter, setSelectedFilter] = useState<CourierStatus | 'all'>('all');
 
-    const couriers = useQuery(api.couriers.list);
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
+
+    const allCouriers = useQuery(api.couriers.list);
+    const myCouriers = useQuery(api.couriers.getMyCouriers,
+        user?._id ? { userId: user._id, role: user.role as any } : "skip" as any
+    );
+
+    const couriers = isAdmin ? allCouriers : myCouriers;
 
     const filteredCouriers = useMemo(() => {
         if (!couriers) return [];
@@ -124,20 +134,28 @@ export default function CourierListScreen() {
             <Stack.Screen options={{ headerShown: false }} />
 
             <View style={styles.header}>
-                <View style={globalStyles.row}>
-                    <Pressable onPress={() => router.back()} style={{ marginRight: spacing.sm }}>
-                        <Text style={styles.backButton}>←</Text>
-                    </Pressable>
-                    <Text style={globalStyles.title}>Couriers</Text>
-                </View>
-                <View style={globalStyles.row}>
-                    <Pressable onPress={handleExport} style={{ marginRight: spacing.lg }}>
-                        <Text style={styles.headerButton}>Export</Text>
-                    </Pressable>
-                    <Pressable onPress={() => router.push('/couriers/add')}>
-                        <Text style={styles.headerButton}>+ Add</Text>
-                    </Pressable>
-                </View>
+                <Pressable
+                    onPress={() => router.back()}
+                    style={({ pressed }) => [
+                        styles.backButtonContainer,
+                        pressed && { opacity: 0.6 }
+                    ]}
+                    hitSlop={15}
+                >
+                    <Ionicons name="arrow-back" size={24} color={colors.text} />
+                </Pressable>
+                <Text style={globalStyles.title}>Couriers</Text>
+                {isAdmin && (
+                    <View style={globalStyles.row}>
+                        <Pressable onPress={handleExport} style={{ marginRight: spacing.lg }}>
+                            <Text style={styles.headerButton}>Export</Text>
+                        </Pressable>
+                        <Pressable onPress={() => router.push('/couriers/add')}>
+                            <Text style={styles.headerButton}>+ Add</Text>
+                        </Pressable>
+                    </View>
+                )}
+                {!isAdmin && <View style={{ width: 44 }} />}
             </View>
 
             <View style={styles.container}>
@@ -216,10 +234,15 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.md,
         marginBottom: spacing.sm,
     },
-    backButton: {
-        fontSize: fontSize.xl,
-        color: colors.text,
-        marginRight: spacing.sm,
+    backButtonContainer: {
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.surface,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: colors.border,
     },
     headerButton: {
         color: colors.primary,
