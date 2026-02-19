@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { colors, spacing, fontSize } from '../styles/theme';
 import { StatusBadge } from './status-badge';
 import { Id } from '../../convex/_generated/dataModel';
+import { Ionicons } from '@expo/vector-icons';
 
 type CourierStatus =
     | 'pending'
@@ -50,15 +51,15 @@ export function CourierCard({ courier, onPress }: CourierCardProps) {
 
             <View style={styles.content}>
                 <View style={styles.row}>
-                    <Text style={styles.icon}>👤</Text>
+                    <Ionicons name="person-outline" size={14} color={colors.textSecondary} style={styles.icon} />
                     <Text style={styles.receiverName}>{courier.receiverName}</Text>
                 </View>
                 <View style={styles.row}>
-                    <Text style={styles.icon}>📞</Text>
+                    <Ionicons name="call-outline" size={14} color={colors.textSecondary} style={styles.icon} />
                     <Text style={styles.phone}>{courier.receiverPhone}</Text>
                 </View>
                 <View style={styles.row}>
-                    <Text style={styles.icon}>📍</Text>
+                    <Ionicons name="location-outline" size={14} color={colors.textSecondary} style={styles.icon} />
                     <Text style={styles.address} numberOfLines={1}>
                         {courier.deliveryAddress}
                     </Text>
@@ -103,8 +104,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     icon: {
-        fontSize: fontSize.sm,
         marginRight: spacing.sm,
+        width: 18,
     },
     receiverName: {
         fontSize: fontSize.sm,

@@ -1,30 +1,52 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Platform } from 'react-native';
 
-// Minimalist color palette
+// Enterprise Palette - Clean, Professional, High Contrast
 export const colors = {
-    background: '#0A0A0B',
-    surface: '#141416',
-    surfaceElevated: '#1C1C1F',
-    border: '#2A2A2E',
+    // Backgrounds
+    background: '#0F172A', // Slate 900
+    surface: '#1E293B',     // Slate 800
+    surfaceHighlight: '#334155', // Slate 700
+    surfaceElevated: '#273549',  // Between Slate 800 & 700
 
-    text: '#FFFFFF',
-    textSecondary: '#9CA3AF',
-    textMuted: '#6B7280',
+    // Borders
+    border: '#334155',      // Slate 700
+    borderLight: '#475569', // Slate 600
 
-    primary: '#3B82F6',
-    primaryLight: '#60A5FA',
+    // Text
+    text: '#F8FAFC',        // Slate 50
+    textSecondary: '#94A3B8', // Slate 400
+    textMuted: '#64748B',   // Slate 500
+    textInverse: '#0F172A', // Slate 900
 
-    // Status colors
+    // Brand / Primary
+    primary: '#3B82F6',     // Blue 500
+    primaryDark: '#2563EB', // Blue 600
+    primaryLight: '#60A5FA', // Blue 400
+
+    // Semantic / Status
+    success: '#10B981',     // Emerald 500
+    successBg: 'rgba(16, 185, 129, 0.1)',
+
+    warning: '#F59E0B',     // Amber 500
+    warningBg: 'rgba(245, 158, 11, 0.1)',
+
+    error: '#EF4444',       // Red 500
+    errorBg: 'rgba(239, 68, 68, 0.1)',
+
+    info: '#06B6D4',        // Cyan 500
+    infoBg: 'rgba(6, 182, 212, 0.1)',
+
+    // Specific Statuses
     pending: '#F59E0B',
-    pickedUp: '#8B5CF6',
+    pickedUp: '#8B5CF6',    // Violet 500
     inTransit: '#3B82F6',
     outForDelivery: '#06B6D4',
     delivered: '#10B981',
     cancelled: '#EF4444',
 
-    success: '#10B981',
-    error: '#EF4444',
-    warning: '#F59E0B',
+    // UI Elements
+    card: '#1E293B',
+    modalOverlay: 'rgba(15, 23, 42, 0.75)',
 };
 
 export const spacing = {
@@ -34,6 +56,7 @@ export const spacing = {
     lg: 24,
     xl: 32,
     xxl: 48,
+    xxxl: 64,
 };
 
 export const fontSize = {
@@ -41,8 +64,17 @@ export const fontSize = {
     sm: 14,
     md: 16,
     lg: 18,
-    xl: 24,
-    xxl: 32,
+    xl: 20,
+    xxl: 24,
+    xxxl: 30,
+};
+
+export const borderRadius = {
+    sm: 4,
+    md: 8,
+    lg: 12,
+    xl: 16,
+    circle: 9999,
 };
 
 export const globalStyles = StyleSheet.create({
@@ -57,38 +89,109 @@ export const globalStyles = StyleSheet.create({
     screenPadding: {
         paddingHorizontal: spacing.md,
     },
-    card: {
-        backgroundColor: colors.surface,
-        borderRadius: 12,
-        padding: spacing.md,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
+
+    // Typography
     title: {
         fontSize: fontSize.xxl,
         fontWeight: '700',
         color: colors.text,
         letterSpacing: -0.5,
+        marginBottom: spacing.xs,
     },
     subtitle: {
+        fontSize: fontSize.md,
+        color: colors.textSecondary,
+        fontWeight: '400',
+    },
+    sectionTitle: {
         fontSize: fontSize.lg,
         fontWeight: '600',
         color: colors.text,
+        marginBottom: spacing.md,
+        marginTop: spacing.xl,
     },
     label: {
         fontSize: fontSize.sm,
         fontWeight: '500',
         color: colors.textSecondary,
         marginBottom: spacing.xs,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
     },
-    text: {
+
+    // Cards
+    card: {
+        backgroundColor: colors.surface,
+        borderRadius: borderRadius.lg,
+        padding: spacing.md,
+        borderWidth: 1,
+        borderColor: colors.border,
+        marginBottom: spacing.md,
+    },
+    cardHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: spacing.md,
+    },
+
+    // Inputs
+    input: {
+        backgroundColor: colors.surface,
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderRadius: borderRadius.md,
+        paddingVertical: Platform.OS === 'ios' ? spacing.md : spacing.sm + 4,
+        paddingHorizontal: spacing.md,
         fontSize: fontSize.md,
         color: colors.text,
     },
-    textSecondary: {
-        fontSize: fontSize.sm,
-        color: colors.textSecondary,
+
+    // Buttons
+    button: {
+        backgroundColor: colors.primary,
+        paddingVertical: spacing.md,
+        paddingHorizontal: spacing.lg,
+        borderRadius: borderRadius.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'row',
     },
+    buttonText: {
+        color: '#FFFFFF',
+        fontSize: fontSize.md,
+        fontWeight: '600',
+    },
+    buttonSecondary: {
+        backgroundColor: 'transparent',
+        borderWidth: 1,
+        borderColor: colors.borderLight,
+        paddingVertical: spacing.md,
+        paddingHorizontal: spacing.lg,
+        borderRadius: borderRadius.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'row',
+    },
+    buttonSecondaryText: {
+        color: colors.text,
+        fontSize: fontSize.md,
+        fontWeight: '500',
+    },
+    buttonDestructive: {
+        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+        borderWidth: 1,
+        borderColor: colors.error,
+        paddingVertical: spacing.md,
+        borderRadius: borderRadius.md,
+        alignItems: 'center',
+    },
+    buttonDestructiveText: {
+        color: colors.error,
+        fontWeight: '600',
+    },
+
+    // Layout
     row: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -98,37 +201,32 @@ export const globalStyles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
     },
-    button: {
-        backgroundColor: colors.primary,
-        paddingVertical: spacing.sm + 4,
-        paddingHorizontal: spacing.lg,
-        borderRadius: 10,
+    center: {
         alignItems: 'center',
         justifyContent: 'center',
     },
-    buttonText: {
-        color: colors.text,
-        fontSize: fontSize.md,
+
+    // Status Badges
+    badge: {
+        paddingVertical: 4,
+        paddingHorizontal: 8,
+        borderRadius: borderRadius.sm,
+        overflow: 'hidden',
+    },
+    badgeText: {
+        fontSize: fontSize.xs,
         fontWeight: '600',
+        textTransform: 'uppercase',
     },
-    buttonSecondary: {
-        backgroundColor: 'transparent',
-        borderWidth: 1,
-        borderColor: colors.border,
-        paddingVertical: spacing.sm + 4,
-        paddingHorizontal: spacing.lg,
-        borderRadius: 10,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    input: {
-        backgroundColor: colors.surface,
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: 10,
-        paddingVertical: spacing.sm + 4,
-        paddingHorizontal: spacing.md,
+
+    // Text
+    text: {
         fontSize: fontSize.md,
         color: colors.text,
+    },
+    textSecondary: {
+        fontSize: fontSize.sm,
+        color: colors.textSecondary,
     },
 });
+

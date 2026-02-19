@@ -10,6 +10,11 @@ function generateTrackingId(): string {
     return `${prefix}-${timestamp}-${random}`;
 }
 
+// Generate Invoice Number
+function generateInvoiceNumber(): string {
+    return `INV-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
+}
+
 // List all couriers (realtime subscription)
 export const list = query({
     args: {},
@@ -21,11 +26,48 @@ export const list = query({
     },
 });
 
-// Get courier by ID
+// Get courier by ID (with relations)
 export const getById = query({
     args: { id: v.id("couriers") },
     handler: async (ctx, args) => {
-        return await ctx.db.get(args.id);
+        const courier = await ctx.db.get(args.id);
+        if (!courier) return null;
+
+        let pod = null;
+        if (courier.podId) {
+            pod = await ctx.db.get(courier.podId);
+        }
+
+        let invoice = null;
+        if (courier.invoiceId) {
+            invoice = await ctx.db.get(courier.invoiceId);
+        }
+
+        return { ...courier, pod, invoice };
+    },
+});
+
+// Get couriers for specific user (Agent or Customer)
+export const getMyCouriers = query({
+    args: {
+        userId: v.id("users"),
+        role: v.union(v.literal("agent"), v.literal("customer")),
+    },
+    handler: async (ctx, args) => {
+        if (args.role === "agent") {
+            return await ctx.db
+                .query("couriers")
+                .withIndex("by_assignedTo", (q) => q.eq("assignedTo", args.userId))
+                .order("desc")
+                .collect();
+        } else {
+            // For customer: return all couriers for demo purposes
+            // In production, filter by createdBy or senderName matching user
+            return await ctx.db
+                .query("couriers")
+                .order("desc")
+                .collect();
+        }
     },
 });
 
@@ -97,7 +139,7 @@ export const filterByStatus = query({
     },
 });
 
-// Get logs for a courier or all logs
+// Get logs
 export const getLogs = query({
     args: { courierId: v.optional(v.id("couriers")) },
     handler: async (ctx, args) => {
@@ -108,7 +150,6 @@ export const getLogs = query({
                 .order("desc")
                 .collect();
         }
-        // Return global logs if no ID provided (limit to recent 50 for performance)
         return await ctx.db
             .query("logs")
             .withIndex("by_timestamp")
@@ -130,6 +171,7 @@ export const create = mutation({
         weight: v.optional(v.number()),
         distance: v.optional(v.number()),
         price: v.optional(v.number()),
+        paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("prepaid"))),
     },
     handler: async (ctx, args) => {
         const now = Date.now();
@@ -148,6 +190,8 @@ export const create = mutation({
             weight: args.weight,
             distance: args.distance,
             price: args.price,
+            paymentStatus: "pending",
+            paymentMethod: args.paymentMethod || "cash",
             createdAt: now,
             updatedAt: now,
         });
@@ -157,7 +201,7 @@ export const create = mutation({
             courierId,
             trackingId,
             action: "created",
-            description: "Courier created by Admin",
+            description: "Courier created",
             timestamp: now,
         });
 
@@ -179,6 +223,8 @@ export const update = mutation({
         weight: v.optional(v.number()),
         distance: v.optional(v.number()),
         price: v.optional(v.number()),
+        paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("prepaid"))),
+        paymentStatus: v.optional(v.union(v.literal("paid"), v.literal("unpaid"), v.literal("pending"))),
     },
     handler: async (ctx, args) => {
         const { id, ...updates } = args;
@@ -198,7 +244,6 @@ export const update = mutation({
             updatedAt: Date.now(),
         });
 
-        // Log update
         await ctx.db.insert("logs", {
             courierId: id,
             trackingId: courier.trackingId,
@@ -206,6 +251,103 @@ export const update = mutation({
             description: "Courier details updated",
             timestamp: Date.now(),
         });
+    },
+});
+
+// Assign Courier
+export const assignCourier = mutation({
+    args: {
+        id: v.id("couriers"),
+        userId: v.id("users"),
+    },
+    handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Courier not found");
+
+        const user = await ctx.db.get(args.userId);
+        if (!user) throw new Error("User not found");
+
+        await ctx.db.patch(args.id, {
+            assignedTo: args.userId,
+            updatedAt: Date.now(),
+        });
+
+        await ctx.db.insert("logs", {
+            courierId: args.id,
+            trackingId: courier.trackingId,
+            action: "assigned",
+            description: `Assigned to agent: ${user.name}`,
+            timestamp: Date.now(),
+        });
+    },
+});
+
+// Complete Delivery (POD)
+export const completeDelivery = mutation({
+    args: {
+        id: v.id("couriers"),
+        signatureId: v.optional(v.string()),
+        photoId: v.optional(v.string()),
+        signeeName: v.string(),
+        latitude: v.optional(v.number()),
+        longitude: v.optional(v.number()),
+    },
+    handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Courier not found");
+
+        const podId = await ctx.db.insert("proofOfDelivery", {
+            courierId: args.id,
+            signatureId: args.signatureId,
+            photoId: args.photoId,
+            signeeName: args.signeeName,
+            location: args.latitude && args.longitude ? {
+                latitude: args.latitude,
+                longitude: args.longitude,
+            } : undefined,
+            timestamp: Date.now(),
+        });
+
+        await ctx.db.patch(args.id, {
+            currentStatus: "delivered",
+            podId,
+            updatedAt: Date.now(),
+        });
+
+        await ctx.db.insert("logs", {
+            courierId: args.id,
+            trackingId: courier.trackingId,
+            action: "status_changed",
+            description: `Delivery Completed (POD Captured). Signed by: ${args.signeeName}`,
+            timestamp: Date.now(),
+        });
+    },
+});
+
+// Generate Invoice
+export const generateInvoice = mutation({
+    args: {
+        id: v.id("couriers"),
+    },
+    handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Courier not found");
+
+        const invoiceId = await ctx.db.insert("invoices", {
+            courierId: args.id,
+            invoiceNumber: generateInvoiceNumber(),
+            amount: courier.price || 0,
+            customerName: courier.senderName, // Billing to sender usually
+            customerAddress: courier.pickupAddress, // Billing address
+            status: courier.paymentStatus === "paid" ? "paid" : "unpaid",
+            generatedAt: Date.now(),
+        });
+
+        await ctx.db.patch(args.id, {
+            invoiceId,
+        });
+
+        return invoiceId;
     },
 });
 
@@ -233,8 +375,6 @@ export const updateStatus = mutation({
             updatedAt: Date.now(),
         });
 
-        // Log status change
-        // Format status for display (e.g., "picked_up" -> "Picked Up")
         const formatStatus = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
 
         await ctx.db.insert("logs", {
@@ -247,6 +387,7 @@ export const updateStatus = mutation({
     },
 });
 
+
 // Delete courier
 export const remove = mutation({
     args: { id: v.id("couriers") },
@@ -256,18 +397,11 @@ export const remove = mutation({
 
         await ctx.db.delete(args.id);
 
-        // Log deletion (courierId is optional, but we pass it anyway as it might be useful for history if we keep logs)
-        // Wait, if we delete the courier, the query for logs by courierId might still work if we just query the logs table directly
-        // but typically we'd want to keep the trackingId primarily.
-
         await ctx.db.insert("logs", {
             trackingId: courier.trackingId,
             action: "deleted",
             description: "Courier deleted",
             timestamp: Date.now(),
-            // We don't verify if courierId makes sense here since doc is gone, but we can store the ID string if we want
-            // or just omit it. Schema says v.optional(v.id("couriers")).
-            // If we store it, it points to nothing.
             courierId: args.id,
         });
     },

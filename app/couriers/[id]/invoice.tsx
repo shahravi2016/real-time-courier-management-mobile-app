@@ -156,10 +156,34 @@ export default function InvoiceScreen() {
                         <View>
                             <Text style={styles.label}>Billed To</Text>
                             <Text style={styles.val}>{courier.senderName}</Text>
+                            <Text style={styles.mutedText}>{courier.pickupAddress}</Text>
                         </View>
-                        <View>
+                        <View style={{ alignItems: 'flex-end' }}>
                             <Text style={styles.label}>Date</Text>
                             <Text style={styles.val}>{new Date(courier.createdAt).toLocaleDateString()}</Text>
+                        </View>
+                    </View>
+
+                    <View style={styles.grid2}>
+                        <View>
+                            <Text style={styles.label}>Ship To</Text>
+                            <Text style={styles.val}>{courier.receiverName}</Text>
+                            <Text style={styles.mutedText}>{courier.deliveryAddress}</Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={styles.label}>Payment</Text>
+                            <View style={[styles.statusChip, {
+                                backgroundColor: courier.paymentStatus === 'paid' ? '#10B98120' : '#F59E0B20',
+                            }]}>
+                                <Text style={[styles.statusChipText, {
+                                    color: courier.paymentStatus === 'paid' ? '#10B981' : '#F59E0B',
+                                }]}>
+                                    {(courier.paymentStatus || 'pending').toUpperCase()}
+                                </Text>
+                            </View>
+                            <Text style={[styles.mutedText, { marginTop: 4 }]}>
+                                {(courier.paymentMethod || 'cash').charAt(0).toUpperCase() + (courier.paymentMethod || 'cash').slice(1)}
+                            </Text>
                         </View>
                     </View>
 
@@ -169,11 +193,11 @@ export default function InvoiceScreen() {
                             <Text style={styles.itemPrice}>$10.00</Text>
                         </View>
                         <View style={styles.lineItem}>
-                            <Text style={styles.itemDesc}>Weight Charge ({courier.weight}kg)</Text>
+                            <Text style={styles.itemDesc}>Weight Charge ({courier.weight || 0}kg × $5)</Text>
                             <Text style={styles.itemPrice}>${((courier.weight || 0) * 5).toFixed(2)}</Text>
                         </View>
                         <View style={styles.lineItem}>
-                            <Text style={styles.itemDesc}>Distance Charge ({courier.distance}km)</Text>
+                            <Text style={styles.itemDesc}>Distance Charge ({courier.distance || 0}km × $2)</Text>
                             <Text style={styles.itemPrice}>${((courier.distance || 0) * 2).toFixed(2)}</Text>
                         </View>
                         <View style={styles.totalRow}>
@@ -276,5 +300,16 @@ const styles = StyleSheet.create({
         color: '#111',
         fontSize: fontSize.xl,
         fontWeight: '800',
-    }
+    },
+    statusChip: {
+        paddingVertical: 4,
+        paddingHorizontal: 10,
+        borderRadius: 6,
+        marginTop: 4,
+    },
+    statusChipText: {
+        fontSize: fontSize.xs,
+        fontWeight: '700',
+        letterSpacing: 0.5,
+    },
 });

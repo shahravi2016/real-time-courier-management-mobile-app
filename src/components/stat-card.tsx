@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors, spacing, fontSize } from '../styles/theme';
+import { Ionicons } from '@expo/vector-icons';
 
 interface StatCardProps {
     icon: string;
@@ -12,8 +13,8 @@ interface StatCardProps {
 export function StatCard({ icon, label, value, color = colors.primary }: StatCardProps) {
     return (
         <View style={styles.card}>
-            <View style={[styles.iconContainer, { backgroundColor: color + '20' }]}>
-                <Text style={styles.icon}>{icon}</Text>
+            <View style={[styles.iconContainer, { backgroundColor: color + '15' }]}>
+                <Ionicons name={icon as any} size={22} color={color} />
             </View>
             <Text style={styles.value}>{value}</Text>
             <Text style={styles.label}>{label}</Text>
@@ -32,15 +33,12 @@ const styles = StyleSheet.create({
         borderColor: colors.border,
     },
     iconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 10,
+        width: 42,
+        height: 42,
+        borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: spacing.sm,
-    },
-    icon: {
-        fontSize: 20,
     },
     value: {
         fontSize: fontSize.xl,

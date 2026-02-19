@@ -58,6 +58,8 @@ export default function CourierListScreen() {
         return result;
     }, [couriers, searchTerm, selectedFilter]);
 
+    const sanitizeCsv = (val: string) => `"${(val || '').replace(/"/g, '""')}"`;
+
     const handleExport = async () => {
         if (!couriers || couriers.length === 0) {
             Alert.alert('No Data', 'There are no couriers to export.');
@@ -66,7 +68,11 @@ export default function CourierListScreen() {
 
         const headers = "Tracking ID,Sender,Receiver,Phone,Status,Pickup,Delivery,Notes,Created At\n";
         const csv = couriers.map(c =>
-            `"${c.trackingId}","${c.senderName}","${c.receiverName}","${c.receiverPhone}","${c.currentStatus}","${c.pickupAddress}","${c.deliveryAddress}","${c.notes || ''}","${new Date(c.createdAt).toISOString()}"`
+            [
+                c.trackingId, c.senderName, c.receiverName, c.receiverPhone,
+                c.currentStatus, c.pickupAddress, c.deliveryAddress,
+                c.notes || '', new Date(c.createdAt).toISOString()
+            ].map(sanitizeCsv).join(',')
         ).join('\n');
         const csvContent = headers + csv;
 
@@ -79,21 +85,28 @@ export default function CourierListScreen() {
                 link.download = "couriers_export.csv";
                 link.click();
             } else {
-                const FS = FileSystem as any;
-                const fileUri = FS.documentDirectory + "couriers_export.csv";
-                if (fileUri) {
-                    await FS.writeAsStringAsync(fileUri, csvContent, { encoding: FS.EncodingType.UTF8 });
+                const docDir = (FileSystem as any).documentDirectory;
+                if (!docDir) {
+                    Alert.alert('Error', 'Cannot access device storage');
+                    return;
+                }
+                const fileUri = docDir + "couriers_export.csv";
+                await (FileSystem as any).writeAsStringAsync(fileUri, csvContent, {
+                    encoding: (FileSystem as any).EncodingType.UTF8,
+                });
 
-                    if (await Sharing.isAvailableAsync()) {
-                        await Sharing.shareAsync(fileUri);
-                    } else {
-                        Alert.alert('Error', 'Sharing is not available on this device');
-                    }
+                if (await Sharing.isAvailableAsync()) {
+                    await Sharing.shareAsync(fileUri, {
+                        mimeType: 'text/csv',
+                        dialogTitle: 'Export Couriers',
+                    });
+                } else {
+                    Alert.alert('Error', 'Sharing is not available on this device');
                 }
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Export failed:', error);
-            Alert.alert('Error', 'Failed to export data');
+            Alert.alert('Export Failed', error?.message || 'Something went wrong');
         }
     };
 
