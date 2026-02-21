@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../convex/_generated/api';
-import { StatCard, LoadingState, ErrorState } from '../src/components';
+import { StatCard, LoadingState, ErrorState, Logo } from '../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../src/styles/theme';
 import { useAuth } from '../src/components/auth-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -98,11 +98,14 @@ export default function DashboardScreen() {
             <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
                 {/* Header */}
                 <View style={styles.header}>
-                    <View>
-                        <Text style={styles.welcomeText}>Welcome back,</Text>
-                        <Text style={globalStyles.title}>
-                            {isAdmin ? 'Admin Console' : isAgent ? 'Agent Console' : 'Customer Console'}
-                        </Text>
+                    <View style={styles.headerInfo}>
+                        <Logo size={42} />
+                        <View>
+                            <Text style={styles.welcomeText}>Welcome back, {user?.name}</Text>
+                            <Text style={globalStyles.title}>
+                                {isAdmin ? 'Admin Console' : isAgent ? 'Agent Console' : 'Customer Console'}
+                            </Text>
+                        </View>
                     </View>
                     <Pressable onPress={logout} style={styles.logoutButton}>
                         <Ionicons name="log-out-outline" size={24} color={colors.error} />
@@ -116,16 +119,20 @@ export default function DashboardScreen() {
                         onPress={() => router.push('/couriers')}
                     >
                         <Ionicons name="list" size={24} color="#fff" />
-                        <Text style={styles.primaryActionText}>View All Couriers</Text>
+                        <Text style={styles.primaryActionText}>
+                            {isAdmin ? 'View All Couriers' : 'My Parcels'}
+                        </Text>
                     </Pressable>
 
-                    {isAdmin && (
+                    {(isAdmin || isCustomer) && (
                         <Pressable
                             style={({ pressed }) => [styles.secondaryAction, pressed && styles.buttonPressed]}
                             onPress={() => router.push('/couriers/add')}
                         >
                             <Ionicons name="add-circle" size={24} color={colors.primary} />
-                            <Text style={styles.secondaryActionText}>Add Courier</Text>
+                            <Text style={styles.secondaryActionText}>
+                                {isAdmin ? 'Add Courier' : 'Book a Parcel'}
+                            </Text>
                         </Pressable>
                     )}
                 </View>
@@ -136,10 +143,25 @@ export default function DashboardScreen() {
                         <>
                             <View style={styles.statsRow}>
                                 <StatCard
-                                    label="Total"
-                                    value={stats.total}
-                                    icon="cube-outline"
+                                    label="Booked"
+                                    value={stats.booked}
+                                    icon="receipt-outline"
                                     color={colors.primary}
+                                />
+                                <View style={{ width: spacing.sm }} />
+                                <StatCard
+                                    label="Picked Up"
+                                    value={stats.pickedUp}
+                                    icon="archive-outline"
+                                    color={colors.pickedUp}
+                                />
+                            </View>
+                            <View style={styles.statsRow}>
+                                <StatCard
+                                    label="Dispatched"
+                                    value={stats.dispatched}
+                                    icon="airplane-outline"
+                                    color="#E67E22"
                                 />
                                 <View style={{ width: spacing.sm }} />
                                 <StatCard
@@ -150,13 +172,6 @@ export default function DashboardScreen() {
                                 />
                             </View>
                             <View style={styles.statsRow}>
-                                <StatCard
-                                    label="In Transit"
-                                    value={stats.inTransit}
-                                    icon="airplane-outline"
-                                    color="#E67E22"
-                                />
-                                <View style={{ width: spacing.sm }} />
                                 <StatCard
                                     label="Revenue"
                                     value={`$${stats.revenue}`}
@@ -389,6 +404,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
+    },
+    headerInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.md,
     },
     welcomeText: {
         fontSize: fontSize.sm,

@@ -12,27 +12,35 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/components/auth-context';
 
 type CourierStatus =
+    | 'booked'
     | 'pending'
     | 'picked_up'
+    | 'dispatched'
     | 'in_transit'
     | 'out_for_delivery'
     | 'delivered'
     | 'cancelled';
 
-const statusFilters: { label: string; value: CourierStatus | 'all' }[] = [
+const statusFilters: { label: string; value: string }[] = [
     { label: 'All', value: 'all' },
-    { label: 'Pending', value: 'pending' },
+    { label: 'Booked', value: 'booked' },
     { label: 'Picked Up', value: 'picked_up' },
-    { label: 'In Transit', value: 'in_transit' },
+    { label: 'Dispatched', value: 'dispatched' },
     { label: 'Out', value: 'out_for_delivery' },
     { label: 'Delivered', value: 'delivered' },
     { label: 'Cancelled', value: 'cancelled' },
 ];
 
+const customerFilters: { label: string; value: string }[] = [
+    { label: 'All Parcels', value: 'all' },
+    { label: 'Active', value: 'active' },
+    { label: 'Completed', value: 'completed' },
+];
+
 export default function CourierListScreen() {
     const router = useRouter();
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedFilter, setSelectedFilter] = useState<CourierStatus | 'all'>('all');
+    const [selectedFilter, setSelectedFilter] = useState<string>('all');
 
     const { user } = useAuth();
     const isAdmin = user?.role === 'admin';
@@ -51,7 +59,13 @@ export default function CourierListScreen() {
 
         // Apply status filter
         if (selectedFilter !== 'all') {
-            result = result.filter((c) => c.currentStatus === selectedFilter);
+            if (selectedFilter === 'active') {
+                result = result.filter((c) => !['delivered', 'cancelled'].includes(c.currentStatus));
+            } else if (selectedFilter === 'completed') {
+                result = result.filter((c) => ['delivered', 'cancelled'].includes(c.currentStatus));
+            } else {
+                result = result.filter((c) => c.currentStatus === selectedFilter);
+            }
         }
 
         // Apply search filter
@@ -171,7 +185,7 @@ export default function CourierListScreen() {
                 {/* Status Filter */}
                 <FlatList
                     horizontal
-                    data={statusFilters}
+                    data={isAdmin ? statusFilters : customerFilters}
                     keyExtractor={(item) => item.value}
                     showsHorizontalScrollIndicator={false}
                     style={styles.filterList}

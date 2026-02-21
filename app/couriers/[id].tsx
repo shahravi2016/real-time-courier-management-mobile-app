@@ -6,6 +6,7 @@ import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
 import { StatusBadge, FormInput, ActivityLog, SignaturePad } from '../../src/components';
+import { generateAndShareInvoice } from '../../src/components/invoice-generator';
 import { colors, spacing, fontSize, globalStyles, borderRadius } from '../../src/styles/theme';
 import { LoadingState, EmptyState, ErrorState } from '../../src/components';
 import { useAuth } from '../../src/components/auth-context';
@@ -13,16 +14,20 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
 type CourierStatus =
+    | 'booked'
     | 'pending'
     | 'picked_up'
+    | 'dispatched'
     | 'in_transit'
     | 'out_for_delivery'
     | 'delivered'
     | 'cancelled';
 
 const statusOptions: { label: string; value: CourierStatus }[] = [
-    { label: 'Pending', value: 'pending' },
+    { label: 'Booked / Registered', value: 'booked' },
+    { label: 'Pending / Action Needed', value: 'pending' },
     { label: 'Picked Up', value: 'picked_up' },
+    { label: 'Dispatched / Arrived at Hub', value: 'dispatched' },
     { label: 'In Transit', value: 'in_transit' },
     { label: 'Out for Delivery', value: 'out_for_delivery' },
     { label: 'Delivered', value: 'delivered' },
@@ -41,7 +46,7 @@ export default function CourierDetailsScreen() {
     const isAssignedToMe = courier?.assignedTo === user?._id;
     const isMyParcel = isCustomer && (
         courier?.receiverPhone === user?.phone ||
-        (courier as any).senderPhone === user?.phone ||
+        courier?.senderPhone === user?.phone ||
         courier?.senderName === user?.name
     );
     const canManageStatus = isAdmin || isAssignedToMe;
@@ -51,6 +56,7 @@ export default function CourierDetailsScreen() {
     const removeCourier = useMutation(api.couriers.remove);
     const completeDelivery = useMutation(api.couriers.completeDelivery);
     const assignCourier = useMutation(api.couriers.assignCourier);
+    const cancelCourier = useMutation(api.couriers.cancelCourier);
 
     const [isEditing, setIsEditing] = useState(false);
     const [showStatusModal, setShowStatusModal] = useState(false);
@@ -63,6 +69,7 @@ export default function CourierDetailsScreen() {
         signeeName: '',
         signature: null as string | null,
         photo: null as string | null,
+        otpCode: '',
     });
     const [editForm, setEditForm] = useState({
         senderName: '',
@@ -189,10 +196,59 @@ export default function CourierDetailsScreen() {
         setIsSubmitting(true);
         try {
             await assignCourier({ id: courier._id, userId: agentId });
+
+            // Notification for Assignment
+            const { notifyStatusChange } = require('../../src/utils/notifications');
+            notifyStatusChange(
+                courier.trackingId,
+                'dispatched', // status changes to dispatched on assignment
+                courier.receiverPhone,
+                courier.senderName
+            );
+
             Alert.alert('Success', 'Courier assigned to agent');
         } catch (error) {
             console.error('Failed to assign agent:', error);
             Alert.alert('Error', 'Failed to assign agent');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleCancelBooking = async () => {
+        if (!courier) return;
+
+        Alert.alert(
+            'Cancel Booking',
+            'Are you sure you want to cancel this booking? This action cannot be undone.',
+            [
+                { text: 'No', style: 'cancel' },
+                {
+                    text: 'Yes, Cancel',
+                    style: 'destructive',
+                    onPress: async () => {
+                        setIsSubmitting(true);
+                        try {
+                            await cancelCourier({ id: courier._id });
+                            Alert.alert('Cancelled', 'Your booking has been cancelled.');
+                        } catch (error: any) {
+                            Alert.alert('Error', error?.message || 'Failed to cancel booking');
+                        } finally {
+                            setIsSubmitting(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleDownloadInvoice = async () => {
+        if (!courier) return;
+        setIsSubmitting(true);
+        try {
+            await generateAndShareInvoice(courier, courier.trackingId);
+        } catch (error) {
+            console.error('Invoice error:', error);
         } finally {
             setIsSubmitting(false);
         }
@@ -242,6 +298,10 @@ export default function CourierDetailsScreen() {
             Alert.alert('Required', 'Signature is mandatory for Proof of Delivery.');
             return;
         }
+        if (!podForm.otpCode || podForm.otpCode.length !== 4) {
+            Alert.alert('OTP Required', 'Please enter the 4-digit delivery OTP.');
+            return;
+        }
 
         // Final sanity check
         if (podForm.signeeName.length < 3) {
@@ -252,19 +312,48 @@ export default function CourierDetailsScreen() {
         setIsSubmitting(true);
         try {
             await completeDelivery({
-                id: courier!._id,
-                signeeName: podForm.signeeName,
-                signatureId: podForm.signature,
+                id: courier._id,
+                signeeName: podForm.signeeName.trim(),
+                signatureId: podForm.signature || undefined,
                 photoId: podForm.photo || undefined,
+                otpCode: podForm.otpCode,
             });
+
+            // Notification for Completion
+            const { notifyStatusChange } = require('../../src/utils/notifications');
+            notifyStatusChange(
+                courier.trackingId,
+                'delivered',
+                courier.receiverPhone,
+                courier.senderName
+            );
+
             setShowPodModal(false);
-            Alert.alert('Success', 'Delivery confirmed with POD');
-        } catch (error) {
-            console.error('POD failure:', error);
-            Alert.alert('Error', 'Failed to submit POD');
+            Alert.alert('Success', 'Delivery completed successfully!');
+        } catch (error: any) {
+            console.error('POD failed:', error);
+            Alert.alert('Error', error?.message || 'Failed to complete delivery');
         } finally {
             setIsSubmitting(false);
         }
+    };
+
+    const handleRebook = () => {
+        if (!courier) return;
+        router.push({
+            pathname: '/couriers/add',
+            params: {
+                rebook: 'true',
+                senderName: courier.senderName,
+                senderPhone: courier.senderPhone || '',
+                receiverName: courier.receiverName,
+                receiverPhone: courier.receiverPhone,
+                pickupAddress: courier.pickupAddress,
+                deliveryAddress: courier.deliveryAddress,
+                weight: courier.weight?.toString() || '',
+                distance: courier.distance?.toString() || '',
+            }
+        });
     };
 
     if (courier === undefined) {
@@ -364,8 +453,81 @@ export default function CourierDetailsScreen() {
                 <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
                     {/* Status Section */}
                     <View style={styles.statusSection}>
-                        <StatusBadge status={courier.currentStatus} />
+                        <StatusBadge status={courier.currentStatus as any} />
+                        {courier.deliveryType === 'express' && (
+                            <View style={styles.expressBadge}>
+                                <Ionicons name="flash" size={12} color="#fff" />
+                                <Text style={styles.expressBadgeText}>EXPRESS</Text>
+                            </View>
+                        )}
                     </View>
+
+                    {/* Status Timeline */}
+                    <View style={styles.timelineSection}>
+                        {(() => {
+                            const steps = [
+                                { key: 'booked', label: 'Booked', icon: 'receipt-outline' },
+                                { key: 'picked_up', label: 'Picked Up', icon: 'bicycle-outline' },
+                                { key: 'in_transit', label: 'In Transit', icon: 'airplane-outline' },
+                                { key: 'out_for_delivery', label: 'Out', icon: 'navigate-outline' },
+                                { key: 'delivered', label: 'Delivered', icon: 'checkmark-done-outline' },
+                            ];
+                            const statusOrder = ['booked', 'pending', 'picked_up', 'dispatched', 'in_transit', 'out_for_delivery', 'delivered'];
+                            const currentIndex = statusOrder.indexOf(courier.currentStatus);
+                            const isCancelled = courier.currentStatus === 'cancelled';
+
+                            return (
+                                <View style={styles.statusBarContainer}>
+                                    <View style={styles.statusBarBackground} />
+                                    <View
+                                        style={[
+                                            styles.statusBarFill,
+                                            { width: isCancelled ? '0%' : `${Math.min(100, (currentIndex / (statusOrder.length - 1)) * 100)}%` }
+                                        ]}
+                                    />
+                                    <View style={styles.statusSteps}>
+                                        {steps.map((step, idx) => {
+                                            const stepIndex = statusOrder.indexOf(step.key);
+                                            const isActive = !isCancelled && currentIndex >= stepIndex;
+                                            return (
+                                                <View key={step.key} style={styles.stepItem}>
+                                                    <View style={[
+                                                        styles.stepCircle,
+                                                        isActive && styles.stepCircleActive,
+                                                        isCancelled && { backgroundColor: colors.border }
+                                                    ]}>
+                                                        <Ionicons
+                                                            name={step.icon as any}
+                                                            size={14}
+                                                            color={isActive ? '#fff' : colors.textMuted}
+                                                        />
+                                                    </View>
+                                                    <Text style={[
+                                                        styles.stepLabel,
+                                                        isActive && styles.stepLabelActive
+                                                    ]}>{step.label}</Text>
+                                                </View>
+                                            );
+                                        })}
+                                    </View>
+                                </View>
+                            );
+                        })()}
+                    </View>
+
+                    {/* Delivery OTP for Sender/Receiver */}
+                    {(isMyParcel || isAdmin) && courier.currentStatus !== 'delivered' && courier.currentStatus !== 'cancelled' && courier.otpCode && (
+                        <View style={styles.otpSection}>
+                            <View style={styles.otpCard}>
+                                <Ionicons name="shield-checkmark" size={20} color={colors.primary} />
+                                <View style={{ marginLeft: 12 }}>
+                                    <Text style={styles.otpLabel}>Delivery Security Code</Text>
+                                    <Text style={styles.otpValue}>{courier.otpCode}</Text>
+                                    <Text style={styles.otpHint}>Share this OTP with the agent upon delivery.</Text>
+                                </View>
+                            </View>
+                        </View>
+                    )}
 
                     {courier.branchId && (
                         <View style={styles.branchHeader}>
@@ -479,7 +641,40 @@ export default function CourierDetailsScreen() {
                         /* View Mode */
                         <>
                             {/* Primary Actions */}
-                            {!isCustomer && (
+                            {isCustomer ? (
+                                <View style={styles.actionsContainer}>
+                                    {courier.currentStatus === 'booked' && (
+                                        <Pressable
+                                            style={[styles.actionButton, { backgroundColor: colors.error }]}
+                                            onPress={handleCancelBooking}
+                                        >
+                                            <Ionicons name="close-circle-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                                            <Text style={styles.actionButtonText}>Cancel Booking</Text>
+                                        </Pressable>
+                                    )}
+                                    {courier.price && (
+                                        <Pressable
+                                            style={[styles.actionButton, { backgroundColor: colors.secondary || '#2c3e50' }]}
+                                            onPress={handleDownloadInvoice}
+                                        >
+                                            <Ionicons name="download-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                                            <Text style={styles.secondaryActionText}>Download Invoice</Text>
+                                        </Pressable>
+                                    )}
+                                    {(courier.currentStatus === 'delivered' || courier.currentStatus === 'cancelled') && (
+                                        <>
+                                            <View style={styles.divider} />
+                                            <Pressable
+                                                style={styles.secondaryAction}
+                                                onPress={handleRebook}
+                                            >
+                                                <Ionicons name="refresh-outline" size={18} color={colors.primary} style={{ marginRight: 6 }} />
+                                                <Text style={[styles.secondaryActionText, { color: colors.primary }]}>Rebook Quick</Text>
+                                            </Pressable>
+                                        </>
+                                    )}
+                                </View>
+                            ) : (
                                 <View style={styles.actionsContainer}>
                                     {isAdmin && (
                                         <Pressable
@@ -595,6 +790,18 @@ export default function CourierDetailsScreen() {
                             </View>
 
                             <View style={styles.section}>
+                                <Text style={styles.sectionTitle}>Tracking Status</Text>
+                                <View style={globalStyles.card}>
+                                    <View style={globalStyles.spaceBetween}>
+                                        <Text style={styles.subValue}>Estimated Delivery</Text>
+                                        <Text style={[styles.value, { color: colors.primary, fontWeight: 'bold' }]}>
+                                            {courier.expectedDeliveryDate || 'TBD'}
+                                        </Text>
+                                    </View>
+                                </View>
+                            </View>
+
+                            <View style={styles.section}>
                                 <Text style={styles.sectionTitle}>Timestamps</Text>
                                 <View style={globalStyles.card}>
                                     <Text style={styles.subValue}>Created: {formattedCreated}</Text>
@@ -647,6 +854,20 @@ export default function CourierDetailsScreen() {
                                 placeholder="Who is receiving?"
                                 value={podForm.signeeName}
                                 onChangeText={(v) => setPodForm(p => ({ ...p, signeeName: v }))}
+                            />
+
+                            <FormInput
+                                label="Delivery OTP (4 Digits)"
+                                placeholder="Enter 4-digit code"
+                                value={podForm.otpCode}
+                                onChangeText={(v) => {
+                                    const numeric = v.replace(/[^0-9]/g, '');
+                                    if (numeric.length <= 4) {
+                                        setPodForm(p => ({ ...p, otpCode: numeric }));
+                                    }
+                                }}
+                                keyboardType="numeric"
+                                maxLength={4}
                             />
 
                             <Text style={styles.podLabel}>Signature</Text>
@@ -954,16 +1175,11 @@ const styles = StyleSheet.create({
     branchHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 4,
-        backgroundColor: colors.surface,
-        borderRadius: 4,
-        alignSelf: 'flex-start',
         marginBottom: spacing.md,
         gap: 6,
     },
     branchHeaderText: {
-        fontSize: 10,
+        fontSize: fontSize.xs,
         fontWeight: '600',
         color: colors.textSecondary,
         textTransform: 'uppercase',
@@ -1166,5 +1382,110 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: fontSize.md,
         fontWeight: '600',
+    },
+    otpSection: {
+        marginBottom: spacing.lg,
+    },
+    otpCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.primary + '10',
+        padding: spacing.md,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: colors.primary + '30',
+        borderStyle: 'dashed',
+    },
+    otpLabel: {
+        fontSize: fontSize.xs,
+        fontWeight: '600',
+        color: colors.primary,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    otpValue: {
+        fontSize: fontSize.xxl,
+        fontWeight: 'bold',
+        color: colors.primary,
+        marginVertical: 2,
+    },
+    otpHint: {
+        fontSize: fontSize.xs,
+        color: colors.textSecondary,
+    },
+    expressBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.warning,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 4,
+        borderRadius: 20,
+        gap: 4,
+    },
+    expressBadgeText: {
+        color: '#fff',
+        fontSize: 10,
+        fontWeight: 'bold',
+    },
+    timelineSection: {
+        marginTop: spacing.sm,
+        marginBottom: spacing.xl,
+        paddingHorizontal: spacing.xs,
+    },
+    statusBarContainer: {
+        height: 60,
+        justifyContent: 'center',
+        position: 'relative',
+    },
+    statusBarBackground: {
+        position: 'absolute',
+        top: 25,
+        left: 20,
+        right: 20,
+        height: 4,
+        backgroundColor: colors.border,
+        borderRadius: 2,
+    },
+    statusBarFill: {
+        position: 'absolute',
+        top: 25,
+        left: 20,
+        height: 4,
+        backgroundColor: colors.primary,
+        borderRadius: 2,
+    },
+    statusSteps: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        width: '100%',
+    },
+    stepItem: {
+        alignItems: 'center',
+        width: 60,
+    },
+    stepCircle: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: colors.surfaceElevated,
+        borderWidth: 2,
+        borderColor: colors.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1,
+    },
+    stepCircleActive: {
+        backgroundColor: colors.primary,
+        borderColor: colors.primary,
+    },
+    stepLabel: {
+        fontSize: 10,
+        color: colors.textSecondary,
+        marginTop: 6,
+        fontWeight: '500',
+    },
+    stepLabelActive: {
+        color: colors.primary,
+        fontWeight: '700',
     },
 });

@@ -6,9 +6,9 @@ import { Id } from '../../convex/_generated/dataModel';
 import { Ionicons } from '@expo/vector-icons';
 
 type CourierStatus =
-    | 'pending'
+    | 'booked'
     | 'picked_up'
-    | 'in_transit'
+    | 'dispatched'
     | 'out_for_delivery'
     | 'delivered'
     | 'cancelled';

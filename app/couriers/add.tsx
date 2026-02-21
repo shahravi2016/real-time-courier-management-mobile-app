@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, Pressable, Text, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { FormInput, LoadingState } from '../../src/components';
@@ -9,16 +9,23 @@ import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme'
 import { Ionicons } from '@expo/vector-icons';
 import { Id } from '../../convex/_generated/dataModel';
 
+import { useAuth } from '../../src/components/auth-context';
+
 const PAYMENT_METHODS = ['cash', 'card', 'prepaid'] as const;
 
 export default function AddCourierScreen() {
     const router = useRouter();
+    const params = useLocalSearchParams();
+    const { user } = useAuth();
+    const isCustomer = user?.role === 'customer';
+
     const createCourier = useMutation(api.couriers.create);
     const branches = useQuery(api.branches.list);
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [form, setForm] = useState({
-        senderName: '',
+        senderName: user?.name || '',
+        senderPhone: user?.phone || '',
         receiverName: '',
         receiverPhone: '',
         pickupAddress: '',
@@ -28,8 +35,32 @@ export default function AddCourierScreen() {
         distance: '',
         expectedDeliveryDate: '',
         paymentMethod: 'cash' as 'cash' | 'card' | 'prepaid',
+        deliveryType: 'normal' as 'normal' | 'express',
         branchId: '' as string,
     });
+    // Pre-fill form from user data OR rebook params
+    React.useEffect(() => {
+        if (params.rebook === 'true') {
+            setForm(prev => ({
+                ...prev,
+                senderName: (params.senderName as string) || user?.name || '',
+                senderPhone: (params.senderPhone as string) || user?.phone || '',
+                receiverName: (params.receiverName as string) || '',
+                receiverPhone: (params.receiverPhone as string) || '',
+                pickupAddress: (params.pickupAddress as string) || '',
+                deliveryAddress: (params.deliveryAddress as string) || '',
+                weight: (params.weight as string) || '',
+                distance: (params.distance as string) || '',
+            }));
+        } else if (isCustomer && user) {
+            setForm(prev => ({
+                ...prev,
+                senderName: user.name || '',
+                senderPhone: user.phone || '',
+            }));
+        }
+    }, [isCustomer, user, params]);
+
     const [errors, setErrors] = useState<Record<string, string>>({});
 
     const updateField = (field: string, value: string) => {
@@ -43,15 +74,21 @@ export default function AddCourierScreen() {
         const w = parseFloat(form.weight) || 0;
         const d = parseFloat(form.distance) || 0;
         if (w === 0 && d === 0) return null;
-        return w * 5 + d * 2 + 10;
+        const basePrice = w * 5 + d * 2 + 10;
+        return form.deliveryType === 'express' ? basePrice * 1.5 : basePrice;
     })();
 
     const validate = () => {
         const newErrors: Record<string, string> = {};
 
         if (!form.senderName.trim()) newErrors.senderName = 'Sender name is required';
-        if (!form.receiverName.trim()) newErrors.receiverName = 'Receiver name is required';
+        if (!form.senderPhone.trim()) {
+            newErrors.senderPhone = 'Sender phone is required';
+        } else if (form.senderPhone.replace(/\D/g, '').length !== 10) {
+            newErrors.senderPhone = 'Sender phone must be 10 digits';
+        }
 
+        if (!form.receiverName.trim()) newErrors.receiverName = 'Receiver name is required';
         if (!form.receiverPhone.trim()) {
             newErrors.receiverPhone = 'Phone number is required';
         } else {
@@ -60,7 +97,7 @@ export default function AddCourierScreen() {
                 newErrors.receiverPhone = 'Phone number must be exactly 10 digits';
             }
         }
-
+        // ... (remaining validation)
         if (!form.pickupAddress.trim()) newErrors.pickupAddress = 'Pickup address is required';
         if (!form.deliveryAddress.trim()) newErrors.deliveryAddress = 'Delivery address is required';
 
@@ -82,7 +119,6 @@ export default function AddCourierScreen() {
         // Branch validation
         if (branches && branches.length > 0 && !form.branchId) {
             newErrors.branch = 'Please select a branch hub';
-            Alert.alert('Selection Required', 'Please select a branch hub for this courier.');
         }
 
         setErrors(newErrors);
@@ -99,6 +135,7 @@ export default function AddCourierScreen() {
 
             const courierId = await createCourier({
                 senderName: form.senderName.trim(),
+                senderPhone: form.senderPhone.trim(),
                 receiverName: form.receiverName.trim(),
                 receiverPhone: form.receiverPhone.trim(),
                 pickupAddress: form.pickupAddress.trim(),
@@ -108,9 +145,12 @@ export default function AddCourierScreen() {
                 distance: d,
                 price: calculatedPrice || undefined,
                 paymentMethod: form.paymentMethod,
+                deliveryType: form.deliveryType,
                 expectedDeliveryDate: form.expectedDeliveryDate.trim() || undefined,
                 branchId: form.branchId ? (form.branchId as Id<'branches'>) : undefined,
+                bookedBy: user?._id as any,
             });
+            // ... (previous code)
 
             // Mock Notification for new order
             const { triggerMockNotification } = require('../../src/utils/notifications');
@@ -173,6 +213,21 @@ export default function AddCourierScreen() {
                         onChangeText={(v) => updateField('senderName', v)}
                         placeholder="Enter sender name"
                         error={errors.senderName}
+                    />
+
+                    <FormInput
+                        label="Sender Phone"
+                        value={form.senderPhone}
+                        onChangeText={(v) => {
+                            const numeric = v.replace(/[^0-9]/g, '');
+                            if (numeric.length <= 10) {
+                                updateField('senderPhone', numeric);
+                            }
+                        }}
+                        placeholder="Enter 10-digit sender phone"
+                        keyboardType="phone-pad"
+                        error={errors.senderPhone}
+                        maxLength={10}
                     />
 
                     <FormInput
@@ -258,7 +313,6 @@ export default function AddCourierScreen() {
                         </View>
                     </View>
 
-                    {/* Payment Method Selector */}
                     <Text style={styles.fieldLabel}>Payment Method</Text>
                     <View style={styles.paymentRow}>
                         {PAYMENT_METHODS.map((method) => (
@@ -281,6 +335,35 @@ export default function AddCourierScreen() {
                                     form.paymentMethod === method && styles.paymentChipTextActive,
                                 ]}>
                                     {method.charAt(0).toUpperCase() + method.slice(1)}
+                                </Text>
+                            </Pressable>
+                        ))}
+                    </View>
+
+                    {/* Delivery Type Selector */}
+                    <Text style={styles.fieldLabel}>Delivery Type</Text>
+                    <View style={styles.paymentRow}>
+                        {(['normal', 'express'] as const).map((type) => (
+                            <Pressable
+                                key={type}
+                                style={[
+                                    styles.paymentChip,
+                                    form.deliveryType === type && styles.paymentChipActive,
+                                    type === 'express' && form.deliveryType === 'express' && { backgroundColor: colors.warning, borderColor: colors.warning }
+                                ]}
+                                onPress={() => setForm(prev => ({ ...prev, deliveryType: type }))}
+                            >
+                                <Ionicons
+                                    name={type === 'normal' ? 'bicycle-outline' : 'flash-outline'}
+                                    size={16}
+                                    color={form.deliveryType === type ? '#fff' : colors.textSecondary}
+                                    style={{ marginRight: 6 }}
+                                />
+                                <Text style={[
+                                    styles.paymentChipText,
+                                    form.deliveryType === type && styles.paymentChipTextActive,
+                                ]}>
+                                    {type.charAt(0).toUpperCase() + type.slice(1)} {type === 'express' ? '(+50%)' : ''}
                                 </Text>
                             </Pressable>
                         ))}

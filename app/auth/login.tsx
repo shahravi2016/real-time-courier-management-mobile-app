@@ -6,6 +6,7 @@ import { useConvex } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 import { useAuth } from '../../src/components/auth-context';
+import { Logo } from '../../src/components';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function LoginScreen() {
@@ -59,10 +60,7 @@ export default function LoginScreen() {
             <View style={styles.container}>
                 {/* Logo Area */}
                 <View style={styles.logoArea}>
-                    <View style={styles.logoIcon}>
-                        <Ionicons name="cube-outline" size={40} color={colors.primary} />
-                    </View>
-                    <Text style={styles.logoText}>Courier Manager</Text>
+                    <Logo size={72} showText />
                 </View>
 
                 <View style={styles.header}>

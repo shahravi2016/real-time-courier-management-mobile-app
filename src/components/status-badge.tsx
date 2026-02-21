@@ -3,8 +3,10 @@ import { View, Text, StyleSheet } from 'react-native';
 import { colors, spacing, fontSize } from '../styles/theme';
 
 type CourierStatus =
+    | 'booked'
     | 'pending'
     | 'picked_up'
+    | 'dispatched'
     | 'in_transit'
     | 'out_for_delivery'
     | 'delivered'
@@ -16,8 +18,10 @@ interface StatusBadgeProps {
 }
 
 const statusConfig: Record<CourierStatus, { label: string; color: string }> = {
+    booked: { label: 'Booked', color: colors.pending },
     pending: { label: 'Pending', color: colors.pending },
     picked_up: { label: 'Picked Up', color: colors.pickedUp },
+    dispatched: { label: 'Dispatched', color: colors.info },
     in_transit: { label: 'In Transit', color: colors.inTransit },
     out_for_delivery: { label: 'Out for Delivery', color: colors.outForDelivery },
     delivered: { label: 'Delivered', color: colors.delivered },

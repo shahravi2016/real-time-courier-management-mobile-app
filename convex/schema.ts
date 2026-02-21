@@ -5,18 +5,22 @@ export default defineSchema({
     couriers: defineTable({
         trackingId: v.string(),
         senderName: v.string(),
+        senderPhone: v.optional(v.string()),
         receiverName: v.string(),
         receiverPhone: v.string(),
         pickupAddress: v.string(),
         deliveryAddress: v.string(),
         currentStatus: v.union(
+            v.literal("booked"),
             v.literal("pending"),
             v.literal("picked_up"),
+            v.literal("dispatched"),
             v.literal("in_transit"),
             v.literal("out_for_delivery"),
             v.literal("delivered"),
             v.literal("cancelled")
         ),
+        deliveryType: v.optional(v.union(v.literal("normal"), v.literal("express"))),
         notes: v.optional(v.string()),
         expectedDeliveryDate: v.optional(v.string()),
 
@@ -29,6 +33,8 @@ export default defineSchema({
 
         assignedTo: v.optional(v.id("users")), // Agent ID
         branchId: v.optional(v.id("branches")), // Branch ID
+        otpCode: v.optional(v.string()), // 4-digit OTP for delivery
+        bookedBy: v.optional(v.id("users")), // User ID who booked
 
         // References
         invoiceId: v.optional(v.id("invoices")),

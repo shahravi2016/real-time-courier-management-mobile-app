@@ -3,6 +3,11 @@ import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
 // Generate a unique tracking ID
+// Helper to generate 4-digit OTP
+function generateOTP(): string {
+    return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
 function generateTrackingId(): string {
     const prefix = "CRR";
     const timestamp = Date.now().toString(36).toUpperCase();
@@ -92,9 +97,9 @@ export const getStats = query({
 
         const stats = {
             total: all.length,
-            pending: all.filter((c) => c.currentStatus === "pending").length,
+            booked: all.filter((c) => c.currentStatus === "booked").length,
             pickedUp: all.filter((c) => c.currentStatus === "picked_up").length,
-            inTransit: all.filter((c) => c.currentStatus === "in_transit").length,
+            dispatched: all.filter((c) => c.currentStatus === "dispatched").length,
             outForDelivery: all.filter((c) => c.currentStatus === "out_for_delivery").length,
             delivered: all.filter((c) => c.currentStatus === "delivered").length,
             cancelled: all.filter((c) => c.currentStatus === "cancelled").length,
@@ -159,9 +164,9 @@ export const getCustomerStats = query({
         });
 
         return {
-            inTransit: myParcels.filter(c => c.currentStatus === "in_transit" || c.currentStatus === "out_for_delivery").length,
+            inTransit: myParcels.filter(c => c.currentStatus === "in_transit" || c.currentStatus === "dispatched" || c.currentStatus === "out_for_delivery").length,
             delivered: myParcels.filter(c => c.currentStatus === "delivered").length,
-            pending: myParcels.filter(c => c.currentStatus === "pending" || c.currentStatus === "picked_up").length,
+            pending: myParcels.filter(c => c.currentStatus === "booked" || c.currentStatus === "picked_up").length,
             total: myParcels.length,
         };
     },
@@ -187,8 +192,10 @@ export const search = query({
 export const filterByStatus = query({
     args: {
         status: v.union(
-            v.literal("pending"),
+            v.literal("booked"),
             v.literal("picked_up"),
+            v.literal("pending"),
+            v.literal("dispatched"),
             v.literal("in_transit"),
             v.literal("out_for_delivery"),
             v.literal("delivered"),
@@ -226,6 +233,7 @@ export const getLogs = query({
 export const create = mutation({
     args: {
         senderName: v.string(),
+        senderPhone: v.string(),
         receiverName: v.string(),
         receiverPhone: v.string(),
         pickupAddress: v.string(),
@@ -237,30 +245,59 @@ export const create = mutation({
         price: v.optional(v.number()),
         paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("prepaid"))),
         branchId: v.optional(v.id("branches")),
+        bookedBy: v.optional(v.id("users")),
+        deliveryType: v.optional(v.union(v.literal("normal"), v.literal("express"))),
     },
     handler: async (ctx, args) => {
         const now = Date.now();
         const trackingId = generateTrackingId();
+        const otpCode = generateOTP();
+
+        // Calculate expected delivery date if not provided
+        let expectedDeliveryDate = args.expectedDeliveryDate;
+        if (!expectedDeliveryDate) {
+            const deliveryDays = (args.deliveryType || "normal") === "express" ? 2 : 5;
+            const date = new Date(now);
+            date.setDate(date.getDate() + deliveryDays);
+            expectedDeliveryDate = date.toISOString().split('T')[0];
+        }
 
         const courierId = await ctx.db.insert("couriers", {
             trackingId,
             senderName: args.senderName,
+            senderPhone: args.senderPhone,
             receiverName: args.receiverName,
             receiverPhone: args.receiverPhone,
             pickupAddress: args.pickupAddress,
             deliveryAddress: args.deliveryAddress,
-            currentStatus: "pending",
+            currentStatus: "booked",
             notes: args.notes,
-            expectedDeliveryDate: args.expectedDeliveryDate,
+            expectedDeliveryDate,
             weight: args.weight,
             distance: args.distance,
             price: args.price,
             paymentStatus: "pending",
             paymentMethod: args.paymentMethod || "cash",
             branchId: args.branchId,
+            otpCode,
+            bookedBy: args.bookedBy,
+            deliveryType: args.deliveryType || "normal",
             createdAt: now,
             updatedAt: now,
         });
+
+        // Automatically generate invoice
+        const invoiceId = await ctx.db.insert("invoices", {
+            courierId,
+            invoiceNumber: generateInvoiceNumber(),
+            amount: args.price || 0,
+            customerName: args.senderName,
+            customerAddress: args.pickupAddress,
+            status: "unpaid",
+            generatedAt: now,
+        });
+
+        await ctx.db.patch(courierId, { invoiceId });
 
         // Log creation
         await ctx.db.insert("logs", {
@@ -336,6 +373,7 @@ export const assignCourier = mutation({
 
         await ctx.db.patch(args.id, {
             assignedTo: args.userId,
+            currentStatus: "dispatched",
             updatedAt: Date.now(),
         });
 
@@ -356,12 +394,17 @@ export const completeDelivery = mutation({
         signatureId: v.optional(v.string()),
         photoId: v.optional(v.string()),
         signeeName: v.string(),
+        otpCode: v.string(),
         latitude: v.optional(v.number()),
         longitude: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
         if (!courier) throw new Error("Courier not found");
+
+        if (courier.otpCode && courier.otpCode !== args.otpCode) {
+            throw new Error("Invalid OTP code. Delivery cannot be completed.");
+        }
 
         // Auth check: If it's a mutation call, we usually check auth via ctx.auth 
         // but since we are using explicit userID in some cases or simple roles:
@@ -428,8 +471,10 @@ export const updateStatus = mutation({
     args: {
         id: v.id("couriers"),
         status: v.union(
-            v.literal("pending"),
+            v.literal("booked"),
             v.literal("picked_up"),
+            v.literal("pending"),
+            v.literal("dispatched"),
             v.literal("in_transit"),
             v.literal("out_for_delivery"),
             v.literal("delivered"),
@@ -462,6 +507,32 @@ export const updateStatus = mutation({
     },
 });
 
+
+// Cancel courier (only if booked)
+export const cancelCourier = mutation({
+    args: { id: v.id("couriers") },
+    handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Courier not found");
+
+        if (courier.currentStatus !== "booked") {
+            throw new Error("Only booked parcels can be cancelled");
+        }
+
+        await ctx.db.patch(args.id, {
+            currentStatus: "cancelled",
+            updatedAt: Date.now(),
+        });
+
+        await ctx.db.insert("logs", {
+            courierId: args.id,
+            trackingId: courier.trackingId,
+            action: "status_changed",
+            description: "Booking cancelled by user",
+            timestamp: Date.now(),
+        });
+    },
+});
 
 // Delete courier
 export const remove = mutation({
