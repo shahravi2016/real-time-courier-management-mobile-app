@@ -18,6 +18,7 @@ export default function AddCourierScreen() {
     const params = useLocalSearchParams();
     const { user } = useAuth();
     const isCustomer = user?.role === 'customer';
+    const isAdmin = user?.role === 'admin';
 
     const createCourier = useMutation(api.couriers.create);
     const branches = useQuery(api.branches.list);
@@ -59,7 +60,7 @@ export default function AddCourierScreen() {
                 senderPhone: user.phone || '',
             }));
         }
-    }, [isCustomer, user, params]);
+    }, [isCustomer, user?.name, user?.phone, params.rebook, params.senderName, params.senderPhone, params.receiverName, params.receiverPhone, params.pickupAddress, params.deliveryAddress, params.weight, params.distance]);
 
     const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -116,8 +117,8 @@ export default function AddCourierScreen() {
             newErrors.distance = 'Distance cannot exceed 2000km';
         }
 
-        // Branch validation
-        if (branches && branches.length > 0 && !form.branchId) {
+        // Branch validation (Admin Only)
+        if (isAdmin && branches && branches.length > 0 && !form.branchId) {
             newErrors.branch = 'Please select a branch hub';
         }
 
@@ -369,44 +370,48 @@ export default function AddCourierScreen() {
                         ))}
                     </View>
 
-                    {/* Branch Selection */}
-                    <Text style={styles.sectionLabel}>Branch Assignment</Text>
-                    <View style={styles.branchContainer}>
-                        {branches && branches.length > 0 ? (
-                            <View style={styles.branchGrid}>
-                                {branches.map((branch) => (
-                                    <Pressable
-                                        key={branch._id}
-                                        style={[
-                                            styles.branchChip,
-                                            form.branchId === branch._id && styles.branchChipActive,
-                                            errors.branch && { borderColor: colors.error }
-                                        ]}
-                                        onPress={() => updateField('branchId', branch._id)}
-                                    >
-                                        <Ionicons
-                                            name="business-outline"
-                                            size={16}
-                                            color={form.branchId === branch._id ? '#fff' : colors.textSecondary}
-                                            style={{ marginRight: 6 }}
-                                        />
-                                        <Text style={[
-                                            styles.branchChipText,
-                                            form.branchId === branch._id && styles.branchChipTextActive
-                                        ]}>
-                                            {branch.name}
-                                        </Text>
-                                    </Pressable>
-                                ))}
+                    {/* Branch Selection (Admin Only) */}
+                    {isAdmin && (
+                        <>
+                            <Text style={styles.sectionLabel}>Branch Assignment</Text>
+                            <View style={styles.branchContainer}>
+                                {branches && branches.length > 0 ? (
+                                    <View style={styles.branchGrid}>
+                                        {branches.map((branch) => (
+                                            <Pressable
+                                                key={branch._id}
+                                                style={[
+                                                    styles.branchChip,
+                                                    form.branchId === branch._id && styles.branchChipActive,
+                                                    errors.branch && { borderColor: colors.error }
+                                                ]}
+                                                onPress={() => updateField('branchId', branch._id)}
+                                            >
+                                                <Ionicons
+                                                    name="business-outline"
+                                                    size={16}
+                                                    color={form.branchId === branch._id ? '#fff' : colors.textSecondary}
+                                                    style={{ marginRight: 6 }}
+                                                />
+                                                <Text style={[
+                                                    styles.branchChipText,
+                                                    form.branchId === branch._id && styles.branchChipTextActive
+                                                ]}>
+                                                    {branch.name}
+                                                </Text>
+                                            </Pressable>
+                                        ))}
+                                    </View>
+                                ) : (
+                                    <View style={styles.emptyBranch}>
+                                        <Ionicons name="alert-circle-outline" size={20} color={colors.textMuted} />
+                                        <Text style={styles.emptyBranchText}>No branches available. Add a branch in dashboard first.</Text>
+                                    </View>
+                                )}
+                                {errors.branch && <Text style={styles.errorText}>{errors.branch}</Text>}
                             </View>
-                        ) : (
-                            <View style={styles.emptyBranch}>
-                                <Ionicons name="alert-circle-outline" size={20} color={colors.textMuted} />
-                                <Text style={styles.emptyBranchText}>No branches available. Add a branch in dashboard first.</Text>
-                            </View>
-                        )}
-                        {errors.branch && <Text style={styles.errorText}>{errors.branch}</Text>}
-                    </View>
+                        </>
+                    )}
 
                     {/* Price Preview */}
                     {calculatedPrice !== null && (

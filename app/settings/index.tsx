@@ -1,0 +1,237 @@
+import React, { useState, useEffect } from 'react';
+import { View, ScrollView, StyleSheet, Pressable, Text, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter, Stack } from 'expo-router';
+import { useMutation } from 'convex/react';
+import { api } from '../../convex/_generated/api';
+import { Id } from '../../convex/_generated/dataModel';
+import { FormInput } from '../../src/components';
+import { colors, spacing, globalStyles } from '../../src/styles/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../../src/components/auth-context';
+
+export default function SettingsScreen() {
+    const router = useRouter();
+    const { user } = useAuth();
+
+    // Safety check in case auth hasn't loaded 
+    if (!user) {
+        return null;
+    }
+
+    const updateProfile = useMutation(api.users.updateProfile);
+
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [form, setForm] = useState({
+        name: user.name || '',
+        phone: user.phone || '',
+    });
+    const [errors, setErrors] = useState<Record<string, string>>({});
+
+    // Keep form sync'd if user context updates from another socket push
+    useEffect(() => {
+        setForm({
+            name: user.name || '',
+            phone: user.phone || '',
+        });
+    }, [user.name, user.phone]);
+
+    const updateField = (field: string, value: string) => {
+        setForm((prev) => ({ ...prev, [field]: value }));
+        if (errors[field]) {
+            setErrors((prev) => ({ ...prev, [field]: '' }));
+        }
+    };
+
+    const validate = () => {
+        const newErrors: Record<string, string> = {};
+        if (!form.name.trim()) newErrors.name = 'Name is required';
+        if (form.phone && form.phone.replace(/\D/g, '').length !== 10) {
+            newErrors.phone = 'Phone number must be exactly 10 digits';
+        }
+        setErrors(newErrors);
+        return Object.keys(newErrors).length === 0;
+    };
+
+    const handleSave = async () => {
+        if (!validate()) return;
+
+        setIsSubmitting(true);
+        try {
+            await updateProfile({
+                id: user._id as Id<'users'>,
+                name: form.name.trim(),
+                phone: form.phone.trim() || undefined,
+            });
+            Alert.alert('Success', 'Profile updated successfully', [
+                { text: 'OK', onPress: () => router.back() },
+            ]);
+        } catch (error: any) {
+            Alert.alert('Error', error.message || 'Failed to update profile.');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <SafeAreaView style={globalStyles.safeArea}>
+            <Stack.Screen options={{ headerShown: false }} />
+            {/* Header */}
+            <View style={styles.header}>
+                <Pressable onPress={() => router.back()} style={styles.backButton}>
+                    <Ionicons name="arrow-back" size={24} color={colors.text} />
+                </Pressable>
+                <Text style={styles.headerTitle}>Profile Settings</Text>
+                <View style={{ width: 40 }} />
+            </View>
+
+            <KeyboardAvoidingView
+                style={{ flex: 1 }}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+                <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+                    <View style={styles.card}>
+                        <View style={styles.avatarContainer}>
+                            <View style={styles.avatar}>
+                                <Text style={styles.avatarText}>
+                                    {form.name ? form.name.charAt(0).toUpperCase() : '?'}
+                                </Text>
+                            </View>
+                            <View style={styles.roleBadge}>
+                                <Text style={styles.roleBadgeText}>
+                                    {user.role.toUpperCase()}
+                                </Text>
+                            </View>
+                        </View>
+
+                        <Text style={styles.sectionTitle}>Account Details</Text>
+
+                        <FormInput
+                            label="Email Address (Read-only)"
+                            value={user.email}
+                            onChangeText={() => { }}
+                        />
+
+                        <FormInput
+                            label="Full Name"
+                            value={form.name}
+                            onChangeText={(val) => updateField('name', val)}
+                            placeholder="Enter your full name"
+                            error={errors.name}
+                        />
+
+                        <FormInput
+                            label="Phone Number"
+                            value={form.phone}
+                            onChangeText={(val) => updateField('phone', val)}
+                            placeholder="10-digit phone number"
+                            keyboardType="phone-pad"
+                            error={errors.phone}
+                        />
+
+                        <Pressable
+                            style={({ pressed }) => [
+                                styles.saveButton,
+                                pressed && styles.saveButtonPressed,
+                                isSubmitting && styles.saveButtonDisabled
+                            ]}
+                            onPress={handleSave}
+                            disabled={isSubmitting}
+                        >
+                            <Text style={styles.saveButtonText}>
+                                {isSubmitting ? 'Saving...' : 'Save Changes'}
+                            </Text>
+                        </Pressable>
+                    </View>
+                </ScrollView>
+            </KeyboardAvoidingView>
+        </SafeAreaView>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        padding: spacing.lg,
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.md,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+    },
+    backButton: {
+        padding: spacing.sm,
+    },
+    headerTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: colors.text,
+    },
+    card: {
+        backgroundColor: colors.surface,
+        borderRadius: 16,
+        padding: spacing.xl,
+        borderWidth: 1,
+        borderColor: colors.border,
+        marginBottom: spacing.xxl,
+    },
+    avatarContainer: {
+        alignItems: 'center',
+        marginBottom: spacing.xl,
+    },
+    avatar: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: spacing.md,
+    },
+    avatarText: {
+        color: '#fff',
+        fontSize: 32,
+        fontWeight: 'bold',
+    },
+    roleBadge: {
+        backgroundColor: colors.border,
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 12,
+    },
+    roleBadgeText: {
+        color: colors.textSecondary,
+        fontSize: 12,
+        fontWeight: '600',
+        letterSpacing: 0.5,
+    },
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: colors.text,
+        marginBottom: spacing.lg,
+        marginTop: spacing.md,
+    },
+    saveButton: {
+        backgroundColor: colors.primary,
+        padding: spacing.md,
+        borderRadius: 8,
+        alignItems: 'center',
+        marginTop: spacing.lg,
+    },
+    saveButtonPressed: {
+        opacity: 0.8,
+    },
+    saveButtonDisabled: {
+        opacity: 0.5,
+    },
+    saveButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+});

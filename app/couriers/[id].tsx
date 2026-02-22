@@ -201,7 +201,7 @@ export default function CourierDetailsScreen() {
             const { notifyStatusChange } = require('../../src/utils/notifications');
             notifyStatusChange(
                 courier.trackingId,
-                'dispatched', // status changes to dispatched on assignment
+                'in_transit', // status changes to in_transit on assignment
                 courier.receiverPhone,
                 courier.senderName
             );
@@ -467,13 +467,17 @@ export default function CourierDetailsScreen() {
                         {(() => {
                             const steps = [
                                 { key: 'booked', label: 'Booked', icon: 'receipt-outline' },
-                                { key: 'picked_up', label: 'Picked Up', icon: 'bicycle-outline' },
                                 { key: 'in_transit', label: 'In Transit', icon: 'airplane-outline' },
                                 { key: 'out_for_delivery', label: 'Out', icon: 'navigate-outline' },
                                 { key: 'delivered', label: 'Delivered', icon: 'checkmark-done-outline' },
                             ];
-                            const statusOrder = ['booked', 'pending', 'picked_up', 'dispatched', 'in_transit', 'out_for_delivery', 'delivered'];
-                            const currentIndex = statusOrder.indexOf(courier.currentStatus);
+
+                            let logicalIndex = 0;
+                            if (courier.currentStatus === 'delivered') logicalIndex = 3;
+                            else if (courier.currentStatus === 'out_for_delivery') logicalIndex = 2;
+                            else if (['in_transit', 'dispatched', 'picked_up', 'pending'].includes(courier.currentStatus)) logicalIndex = 1;
+                            else logicalIndex = 0; // booked
+
                             const isCancelled = courier.currentStatus === 'cancelled';
 
                             return (
@@ -482,13 +486,12 @@ export default function CourierDetailsScreen() {
                                     <View
                                         style={[
                                             styles.statusBarFill,
-                                            { width: isCancelled ? '0%' : `${Math.min(100, (currentIndex / (statusOrder.length - 1)) * 100)}%` }
+                                            { width: isCancelled ? '0%' : `${Math.min(100, (logicalIndex / (steps.length - 1)) * 100)}%` }
                                         ]}
                                     />
                                     <View style={styles.statusSteps}>
                                         {steps.map((step, idx) => {
-                                            const stepIndex = statusOrder.indexOf(step.key);
-                                            const isActive = !isCancelled && currentIndex >= stepIndex;
+                                            const isActive = !isCancelled && logicalIndex >= idx;
                                             return (
                                                 <View key={step.key} style={styles.stepItem}>
                                                     <View style={[

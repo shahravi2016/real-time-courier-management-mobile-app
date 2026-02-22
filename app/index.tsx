@@ -107,9 +107,14 @@ export default function DashboardScreen() {
                             </Text>
                         </View>
                     </View>
-                    <Pressable onPress={logout} style={styles.logoutButton}>
-                        <Ionicons name="log-out-outline" size={24} color={colors.error} />
-                    </Pressable>
+                    <View style={styles.headerActions}>
+                        <Pressable onPress={() => router.push('/settings')} style={styles.iconButton}>
+                            <Ionicons name="settings-outline" size={24} color={colors.text} />
+                        </Pressable>
+                        <Pressable onPress={logout} style={[styles.iconButton, { marginLeft: 12 }]}>
+                            <Ionicons name="log-out-outline" size={24} color={colors.error} />
+                        </Pressable>
+                    </View>
                 </View>
 
                 {/* Main Actions */}
@@ -424,10 +429,14 @@ const styles = StyleSheet.create({
         marginTop: spacing.xs,
         letterSpacing: 0.5,
     },
-    logoutButton: {
-        padding: spacing.sm,
+    headerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    iconButton: {
+        padding: 8,
         backgroundColor: colors.surface,
-        borderRadius: 10,
+        borderRadius: 8,
         borderWidth: 1,
         borderColor: colors.border,
     },
