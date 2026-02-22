@@ -44,13 +44,17 @@ export default function CourierListScreen() {
 
     const { user } = useAuth();
     const isAdmin = user?.role === 'admin';
+    const isBranchManager = user?.role === 'branch_manager';
 
     const allCouriers = useQuery(api.couriers.list);
+    const branchCouriers = useQuery(api.couriers.list, 
+        (isBranchManager && user?.branchId) ? { branchId: user.branchId as any } : "skip"
+    );
     const myCouriers = useQuery(api.couriers.getMyCouriers,
-        user?._id ? { userId: user._id, role: user.role as any } : "skip" as any
+        (user?._id && (user.role === 'agent' || user.role === 'customer')) ? { userId: user._id, role: user.role as any } : "skip" as any
     );
 
-    const couriers = isAdmin ? allCouriers : myCouriers;
+    const couriers = isAdmin ? allCouriers : (isBranchManager ? branchCouriers : myCouriers);
 
     const filteredCouriers = useMemo(() => {
         if (!couriers) return [];
@@ -159,7 +163,7 @@ export default function CourierListScreen() {
                     <Ionicons name="arrow-back" size={24} color={colors.text} />
                 </Pressable>
                 <Text style={globalStyles.title}>Couriers</Text>
-                {isAdmin && (
+                {(isAdmin || isBranchManager) && (
                     <View style={globalStyles.row}>
                         <Pressable onPress={handleExport} style={{ marginRight: spacing.lg }}>
                             <Text style={styles.headerButton}>Export</Text>
@@ -169,7 +173,7 @@ export default function CourierListScreen() {
                         </Pressable>
                     </View>
                 )}
-                {!isAdmin && <View style={{ width: 44 }} />}
+                {(!isAdmin && !isBranchManager) && <View style={{ width: 44 }} />}
             </View>
 
             <View style={styles.container}>
@@ -183,31 +187,33 @@ export default function CourierListScreen() {
                 />
 
                 {/* Status Filter */}
-                <FlatList
-                    horizontal
-                    data={isAdmin ? statusFilters : customerFilters}
-                    keyExtractor={(item) => item.value}
-                    showsHorizontalScrollIndicator={false}
-                    style={styles.filterList}
-                    renderItem={({ item }) => (
-                        <Pressable
-                            onPress={() => setSelectedFilter(item.value)}
-                            style={[
-                                styles.filterChip,
-                                selectedFilter === item.value && styles.filterChipActive,
-                            ]}
-                        >
-                            <Text
+                <View style={styles.filterWrapper}>
+                    <FlatList
+                        horizontal
+                        data={(isAdmin || isBranchManager) ? statusFilters : customerFilters}
+                        keyExtractor={(item) => item.value}
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.filterContent}
+                        renderItem={({ item }) => (
+                            <Pressable
+                                onPress={() => setSelectedFilter(item.value)}
                                 style={[
-                                    styles.filterText,
-                                    selectedFilter === item.value && styles.filterTextActive,
+                                    styles.filterChip,
+                                    selectedFilter === item.value && styles.filterChipActive,
                                 ]}
                             >
-                                {item.label}
-                            </Text>
-                        </Pressable>
-                    )}
-                />
+                                <Text
+                                    style={[
+                                        styles.filterText,
+                                        selectedFilter === item.value && styles.filterTextActive,
+                                    ]}
+                                >
+                                    {item.label}
+                                </Text>
+                            </Pressable>
+                        )}
+                    />
+                </View>
 
                 {/* Courier List */}
                 {filteredCouriers.length === 0 ? (
@@ -274,18 +280,23 @@ const styles = StyleSheet.create({
         color: colors.text,
         marginTop: spacing.sm,
     },
-    filterList: {
-        marginVertical: spacing.md,
-        maxHeight: 40,
+    filterWrapper: {
+        height: 44,
+        marginTop: spacing.md,
+        marginBottom: spacing.sm,
+    },
+    filterContent: {
+        paddingRight: spacing.xl,
     },
     filterChip: {
-        paddingVertical: spacing.xs + 2,
-        paddingHorizontal: spacing.md,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
         borderRadius: 20,
         backgroundColor: colors.surface,
         borderWidth: 1,
         borderColor: colors.border,
         marginRight: spacing.sm,
+        height: 36,
     },
     filterChipActive: {
         backgroundColor: colors.primary,

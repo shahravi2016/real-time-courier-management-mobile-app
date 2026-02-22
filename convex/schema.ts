@@ -62,13 +62,15 @@ export default defineSchema({
         name: v.string(),
         email: v.string(),
         password: v.string(), // Hashed (in real app) or simple fallback for competition
-        role: v.union(v.literal("admin"), v.literal("agent"), v.literal("customer")),
+        role: v.union(v.literal("admin"), v.literal("branch_manager"), v.literal("agent"), v.literal("customer")),
         phone: v.optional(v.string()),
+        branchId: v.optional(v.id("branches")), // For Branch Managers
         avatarId: v.optional(v.string()), // Storage ID for avatar
         createdAt: v.number(),
     })
         .index("by_email", ["email"])
-        .index("by_role", ["role"]),
+        .index("by_role", ["role"])
+        .index("by_branchId", ["branchId"]),
 
     invoices: defineTable({
         courierId: v.id("couriers"),

@@ -5,7 +5,8 @@ interface User {
     _id: string;
     name: string;
     email: string;
-    role: 'admin' | 'agent' | 'customer';
+    role: 'admin' | 'branch_manager' | 'agent' | 'customer';
+    branchId?: string;
     phone?: string;
 }
 

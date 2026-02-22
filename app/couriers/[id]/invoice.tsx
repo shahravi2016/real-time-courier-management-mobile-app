@@ -80,26 +80,26 @@ export default function InvoiceScreen() {
                             <tr>
                                 <td>Shipping Charges (Weight: ${courier.weight}kg)</td>
                                 <td>1</td>
-                                <td>$5.00/kg</td>
-                                <td>$${(courier.weight || 0) * 5}</td>
+                                <td>₹5.00/kg</td>
+                                <td>₹${(courier.weight || 0) * 5}</td>
                             </tr>
                              <tr>
                                 <td>Distance Charges (${courier.distance}km)</td>
                                 <td>1</td>
-                                <td>$2.00/km</td>
-                                <td>$${(courier.distance || 0) * 2}</td>
+                                <td>₹2.00/km</td>
+                                <td>₹${(courier.distance || 0) * 2}</td>
                             </tr>
                             <tr>
                                 <td>Base Fee</td>
                                 <td>1</td>
-                                <td>$10.00</td>
-                                <td>$10.00</td>
+                                <td>₹10.00</td>
+                                <td>₹10.00</td>
                             </tr>
                         </tbody>
                     </table>
 
                     <div class="total">
-                        Total: $${(courier.price || 0).toFixed(2)}
+                        Total: ₹${(courier.price || 0).toFixed(2)}
                     </div>
 
                     <div class="footer">
@@ -190,19 +190,19 @@ export default function InvoiceScreen() {
                     <View style={styles.lineItems}>
                         <View style={styles.lineItem}>
                             <Text style={styles.itemDesc}>Base Fare</Text>
-                            <Text style={styles.itemPrice}>$10.00</Text>
+                            <Text style={styles.itemPrice}>₹10.00</Text>
                         </View>
                         <View style={styles.lineItem}>
-                            <Text style={styles.itemDesc}>Weight Charge ({courier.weight || 0}kg × $5)</Text>
-                            <Text style={styles.itemPrice}>${((courier.weight || 0) * 5).toFixed(2)}</Text>
+                            <Text style={styles.itemDesc}>Weight Charge ({courier.weight || 0}kg × ₹5)</Text>
+                            <Text style={styles.itemPrice}>₹${((courier.weight || 0) * 5).toFixed(2)}</Text>
                         </View>
                         <View style={styles.lineItem}>
-                            <Text style={styles.itemDesc}>Distance Charge ({courier.distance || 0}km × $2)</Text>
-                            <Text style={styles.itemPrice}>${((courier.distance || 0) * 2).toFixed(2)}</Text>
+                            <Text style={styles.itemDesc}>Distance Charge ({courier.distance || 0}km × ₹2)</Text>
+                            <Text style={styles.itemPrice}>₹${((courier.distance || 0) * 2).toFixed(2)}</Text>
                         </View>
                         <View style={styles.totalRow}>
                             <Text style={styles.totalLabel}>Total</Text>
-                            <Text style={styles.totalValue}>${(courier.price || 0).toFixed(2)}</Text>
+                            <Text style={styles.totalValue}>₹${(courier.price || 0).toFixed(2)}</Text>
                         </View>
                     </View>
                 </View>

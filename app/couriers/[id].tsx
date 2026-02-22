@@ -27,10 +27,8 @@ const statusOptions: { label: string; value: CourierStatus }[] = [
     { label: 'Booked / Registered', value: 'booked' },
     { label: 'Pending / Action Needed', value: 'pending' },
     { label: 'Picked Up', value: 'picked_up' },
-    { label: 'Dispatched / Arrived at Hub', value: 'dispatched' },
+    { label: 'Arrived at Hub', value: 'dispatched' },
     { label: 'In Transit', value: 'in_transit' },
-    { label: 'Out for Delivery', value: 'out_for_delivery' },
-    { label: 'Delivered', value: 'delivered' },
     { label: 'Cancelled', value: 'cancelled' },
 ];
 
@@ -41,15 +39,18 @@ export default function CourierDetailsScreen() {
 
     const courier = useQuery(api.couriers.getById, { id: id as Id<'couriers'> });
     const agents = useQuery(api.users.listAgents);
+    const branches = useQuery(api.branches.list);
     const isAdmin = user?.role === 'admin';
+    const isBranchManager = user?.role === 'branch_manager';
     const isCustomer = user?.role === 'customer';
     const isAssignedToMe = courier?.assignedTo === user?._id;
+    const belongsToMyBranch = courier?.branchId === user?.branchId;
     const isMyParcel = isCustomer && (
         courier?.receiverPhone === user?.phone ||
         courier?.senderPhone === user?.phone ||
         courier?.senderName === user?.name
     );
-    const canManageStatus = isAdmin || isAssignedToMe;
+    const canManageStatus = isAdmin || isAssignedToMe || (isBranchManager && belongsToMyBranch);
 
     const updateCourier = useMutation(api.couriers.update);
     const updateStatus = useMutation(api.couriers.updateStatus);
@@ -63,7 +64,25 @@ export default function CourierDetailsScreen() {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [showPodModal, setShowPodModal] = useState(false);
     const [showAgentModal, setShowAgentModal] = useState(false);
+    const [showBranchModal, setShowBranchModal] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const showMenu = () => {
+        const options = [
+            { text: 'Cancel', style: 'cancel' as const },
+            { text: 'Edit Courier Details', onPress: () => setIsEditing(true) },
+        ];
+
+        if (isAdmin) {
+            options.push({
+                text: 'Delete Courier',
+                onPress: handleDelete,
+                style: 'destructive' as const
+            });
+        }
+
+        Alert.alert('Courier Actions', 'Select an operation:', options);
+    };
 
     const [podForm, setPodForm] = useState({
         signeeName: '',
@@ -71,20 +90,26 @@ export default function CourierDetailsScreen() {
         photo: null as string | null,
         otpCode: '',
     });
-    const [editForm, setEditForm] = useState({
-        senderName: '',
-        receiverName: '',
-        receiverPhone: '',
-        pickupAddress: '',
-        deliveryAddress: '',
-        notes: '',
-        weight: '',
-        distance: '',
-    });
-
-    const [editErrors, setEditErrors] = useState<Record<string, string>>({});
-
-    const startEditing = () => {
+        // ... rest of the state
+    
+        const handleAssignBranch = async (branchId: Id<'branches'>) => {
+            if (!courier) return;
+            setShowBranchModal(false);
+            setIsSubmitting(true);
+            try {
+                await updateCourier({
+                    id: courier._id,
+                    branchId,
+                });
+                Alert.alert('Success', 'Parcel assigned to branch hub.');
+            } catch (error) {
+                Alert.alert('Error', 'Failed to assign branch');
+            } finally {
+                setIsSubmitting(false);
+            }
+        };
+    
+        const startEditing = () => {
         if (courier) {
             setEditForm({
                 senderName: courier.senderName,
@@ -95,6 +120,7 @@ export default function CourierDetailsScreen() {
                 notes: courier.notes || '',
                 weight: courier.weight?.toString() || '',
                 distance: courier.distance?.toString() || '',
+                branchId: courier.branchId || '',
             });
             setEditErrors({});
             setIsEditing(true);
@@ -134,6 +160,11 @@ export default function CourierDetailsScreen() {
             newErrors.distance = 'Distance cannot exceed 2000km';
         }
 
+        // Mandatory Branch Assignment
+        if ((isAdmin || isBranchManager) && !editForm.branchId) {
+            newErrors.branchId = 'Branch assignment is mandatory';
+        }
+
         setEditErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
@@ -157,6 +188,7 @@ export default function CourierDetailsScreen() {
                 price: (editForm.weight && editForm.distance)
                     ? (parseFloat(editForm.weight) * 5 + parseFloat(editForm.distance) * 2 + 10)
                     : undefined,
+                branchId: editForm.branchId ? (editForm.branchId as Id<'branches'>) : undefined,
             });
             setIsEditing(false);
         } catch (error) {
@@ -332,7 +364,12 @@ export default function CourierDetailsScreen() {
             Alert.alert('Success', 'Delivery completed successfully!');
         } catch (error: any) {
             console.error('POD failed:', error);
-            Alert.alert('Error', error?.message || 'Failed to complete delivery');
+            const errorMessage = error?.message || '';
+            if (errorMessage.includes('Invalid OTP')) {
+                Alert.alert('Security Check Failed', 'The OTP code you entered is incorrect. Please ask the customer for the 4-digit code shown on their tracking screen.');
+            } else {
+                Alert.alert('System Error', 'Failed to complete delivery. Please try again or contact support.');
+            }
         } finally {
             setIsSubmitting(false);
         }
@@ -437,8 +474,8 @@ export default function CourierDetailsScreen() {
                 </Pressable>
                 <Text style={styles.headerTitle}>Courier Details</Text>
                 <View style={styles.headerActions}>
-                    {canManageStatus && (
-                        <Pressable onPress={() => setShowStatusModal(true)} style={styles.actionIconButton}>
+                    {(isAdmin || (isBranchManager && belongsToMyBranch)) && (
+                        <Pressable onPress={showMenu} style={styles.actionIconButton}>
                             <Ionicons name="ellipsis-vertical" size={22} color={colors.primary} />
                         </Pressable>
                     )}
@@ -483,12 +520,17 @@ export default function CourierDetailsScreen() {
                             return (
                                 <View style={styles.statusBarContainer}>
                                     <View style={styles.statusBarBackground} />
-                                    <View
-                                        style={[
-                                            styles.statusBarFill,
-                                            { width: isCancelled ? '0%' : `${Math.min(100, (logicalIndex / (steps.length - 1)) * 100)}%` }
-                                        ]}
-                                    />
+                                    <View style={styles.statusBarFillContainer}>
+                                        <View
+                                            style={[
+                                                styles.statusBarFill,
+                                                { 
+                                                    width: isCancelled ? '0%' : 
+                                                           `${(logicalIndex / (steps.length - 1)) * 100}%`
+                                                }
+                                            ]}
+                                        />
+                                    </View>
                                     <View style={styles.statusSteps}>
                                         {steps.map((step, idx) => {
                                             const isActive = !isCancelled && logicalIndex >= idx;
@@ -535,7 +577,9 @@ export default function CourierDetailsScreen() {
                     {courier.branchId && (
                         <View style={styles.branchHeader}>
                             <Ionicons name="business" size={14} color={colors.textSecondary} />
-                            <Text style={styles.branchHeaderText}>Assigned to Branch</Text>
+                            <Text style={styles.branchHeaderText}>
+                                Assigned to: {branches?.find(b => b._id === courier.branchId)?.name || 'Loading branch...'}
+                            </Text>
                         </View>
                     )}
 
@@ -601,6 +645,30 @@ export default function CourierDetailsScreen() {
                                 multiline
                             />
 
+                            {/* Branch Selection UI in Edit Mode */}
+                            {(isAdmin || isBranchManager) && (
+                                <View style={{ marginBottom: spacing.md }}>
+                                    <Text style={globalStyles.label}>Branch Hub (Mandatory)</Text>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
+                                        {branches?.map(b => (
+                                            <Pressable
+                                                key={b._id}
+                                                style={[
+                                                    styles.branchChipSmall,
+                                                    editForm.branchId === b._id && { backgroundColor: colors.primary, borderColor: colors.primary }
+                                                ]}
+                                                onPress={() => setEditForm(p => ({ ...p, branchId: b._id }))}
+                                            >
+                                                <Text style={[styles.branchChipSmallText, editForm.branchId === b._id && { color: '#fff' }]}>
+                                                    {b.name}
+                                                </Text>
+                                            </Pressable>
+                                        ))}
+                                    </ScrollView>
+                                    {editErrors.branchId && <Text style={styles.errorTextSmall}>{editErrors.branchId}</Text>}
+                                </View>
+                            )}
+
                             <View style={globalStyles.row}>
                                 <View style={{ flex: 1 }}>
                                     <FormInput
@@ -645,89 +713,122 @@ export default function CourierDetailsScreen() {
                         <>
                             {/* Primary Actions */}
                             {isCustomer ? (
-                                <View style={styles.actionsContainer}>
-                                    {courier.currentStatus === 'booked' && (
-                                        <Pressable
-                                            style={[styles.actionButton, { backgroundColor: colors.error }]}
-                                            onPress={handleCancelBooking}
-                                        >
-                                            <Ionicons name="close-circle-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-                                            <Text style={styles.actionButtonText}>Cancel Booking</Text>
-                                        </Pressable>
-                                    )}
-                                    {courier.price && (
-                                        <Pressable
-                                            style={[styles.actionButton, { backgroundColor: colors.secondary || '#2c3e50' }]}
-                                            onPress={handleDownloadInvoice}
-                                        >
-                                            <Ionicons name="download-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-                                            <Text style={styles.secondaryActionText}>Download Invoice</Text>
-                                        </Pressable>
-                                    )}
-                                    {(courier.currentStatus === 'delivered' || courier.currentStatus === 'cancelled') && (
-                                        <>
-                                            <View style={styles.divider} />
+                                <View style={styles.actionsContainerVertical}>
+                                    <View style={styles.actionsRow}>
+                                        {courier.currentStatus === 'booked' && (
                                             <Pressable
-                                                style={styles.secondaryAction}
-                                                onPress={handleRebook}
+                                                style={[styles.actionButtonSplit, { backgroundColor: colors.error }]}
+                                                onPress={handleCancelBooking}
                                             >
-                                                <Ionicons name="refresh-outline" size={18} color={colors.primary} style={{ marginRight: 6 }} />
-                                                <Text style={[styles.secondaryActionText, { color: colors.primary }]}>Rebook Quick</Text>
+                                                <Ionicons name="close-circle-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+                                                <Text style={styles.actionButtonTextSmall}>Cancel</Text>
                                             </Pressable>
-                                        </>
+                                        )}
+                                        {courier.price && (
+                                            <Pressable
+                                                style={[styles.actionButtonSplit, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
+                                                onPress={handleDownloadInvoice}
+                                            >
+                                                <Ionicons name="download-outline" size={18} color={colors.primary} style={{ marginRight: 6 }} />
+                                                <Text style={[styles.actionButtonTextSmall, { color: colors.primary }]}>Invoice</Text>
+                                            </Pressable>
+                                        )}
+                                    </View>
+                                    {(courier.currentStatus === 'delivered' || courier.currentStatus === 'cancelled') && (
+                                        <Pressable
+                                            style={styles.fullWidthButton}
+                                            onPress={handleRebook}
+                                        >
+                                            <Ionicons name="refresh-outline" size={20} color={colors.primary} style={{ marginRight: 8 }} />
+                                            <Text style={[styles.actionButtonText, { color: colors.primary }]}>Rebook Quick</Text>
+                                        </Pressable>
                                     )}
                                 </View>
                             ) : (
-                                <View style={styles.actionsContainer}>
+                                <View style={styles.actionsContainerVertical}>
+                                    <View style={styles.actionsRow}>
+                                        {(isAdmin || (isBranchManager && belongsToMyBranch)) && (
+                                            <Pressable
+                                                style={[styles.actionButtonSplit, styles.assignButton]}
+                                                onPress={() => {
+                                                    if (!courier.branchId && isAdmin) {
+                                                        Alert.alert('Incomplete', 'Please assign a branch hub first.');
+                                                    } else {
+                                                        setShowAgentModal(true);
+                                                    }
+                                                }}
+                                            >
+                                                <Ionicons name="person-add-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+                                                <Text style={styles.actionButtonTextSmall}>Assign Agent</Text>
+                                            </Pressable>
+                                        )}
+
+                                        {canManageStatus && courier.currentStatus !== 'delivered' && courier.currentStatus !== 'cancelled' && (
+                                            <Pressable
+                                                style={styles.actionButtonSplit}
+                                                onPress={() => {
+                                                    // Only Admin and Assigned Agent can trigger the OTP/POD flow
+                                                    if (courier.currentStatus === 'out_for_delivery' && (isAdmin || isAssignedToMe)) {
+                                                        setShowPodModal(true);
+                                                    } else {
+                                                        setShowStatusModal(true);
+                                                    }
+                                                }}
+                                            >
+                                                <Ionicons
+                                                    name={courier.currentStatus === 'out_for_delivery' && (isAdmin || isAssignedToMe) ? "checkbox-outline" : "sync-outline"}
+                                                    size={18}
+                                                    color="#fff"
+                                                    style={{ marginRight: 6 }}
+                                                />
+                                                <Text style={styles.actionButtonTextSmall}>
+                                                    {courier.currentStatus === 'out_for_delivery' && (isAdmin || isAssignedToMe) ? 'Complete' : 'Update'}
+                                                </Text>
+                                            </Pressable>
+                                        )}
+                                    </View>
+
                                     {isAdmin && (
                                         <Pressable
-                                            style={[styles.actionButton, styles.assignButton]}
-                                            onPress={() => setShowAgentModal(true)}
+                                            style={[styles.fullWidthButton, { marginTop: spacing.sm }]}
+                                            onPress={() => setShowBranchModal(true)}
                                         >
-                                            <Ionicons name="person-add-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-                                            <Text style={styles.actionButtonText}>Assign Agent</Text>
-                                        </Pressable>
-                                    )}
-
-                                    {canManageStatus && courier.currentStatus !== 'delivered' && courier.currentStatus !== 'cancelled' && (
-                                        <Pressable
-                                            style={styles.actionButton}
-                                            onPress={() => {
-                                                if (courier.currentStatus === 'out_for_delivery') {
-                                                    setShowPodModal(true);
-                                                } else {
-                                                    setShowStatusModal(true);
-                                                }
-                                            }}
-                                        >
-                                            <Ionicons
-                                                name={courier.currentStatus === 'out_for_delivery' ? "checkbox-outline" : "sync-outline"}
-                                                size={20}
-                                                color="#fff"
-                                                style={{ marginRight: 8 }}
-                                            />
+                                            <Ionicons name="business-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
                                             <Text style={styles.actionButtonText}>
-                                                {courier.currentStatus === 'out_for_delivery' ? 'Proof of Delivery' : 'Update Status'}
+                                                {courier.branchId ? 'Reassign Branch Hub' : 'Assign Branch Hub'}
                                             </Text>
                                         </Pressable>
                                     )}
                                 </View>
                             )}
 
-                            {/* Secondary Actions (Edit/Delete) - Admin Only */}
-                            {isAdmin && (
-                                <View style={styles.secondaryActions}>
-                                    <Pressable style={styles.secondaryAction} onPress={() => setIsEditing(true)}>
-                                        <Ionicons name="create-outline" size={18} color={colors.primary} style={{ marginRight: 6 }} />
-                                        <Text style={[styles.secondaryActionText, { color: colors.primary }]}>Edit Details</Text>
-                                    </Pressable>
-                                    <View style={styles.divider} />
-                                    <Pressable style={styles.secondaryAction} onPress={handleDelete}>
-                                        <Ionicons name="trash-outline" size={18} color={colors.error} style={{ marginRight: 6 }} />
-                                        <Text style={[styles.secondaryActionText, { color: colors.error }]}>Delete Courier</Text>
-                                    </Pressable>
+                            {/* Logistics Hub Info */}
+                            <View style={styles.section}>
+                                <Text style={styles.sectionTitle}>Logistics Hub</Text>
+                                <View style={globalStyles.card}>
+                                    <View style={styles.hubRow}>
+                                        <Ionicons name="business" size={18} color={colors.primary} />
+                                        <View style={{ marginLeft: 12 }}>
+                                            <Text style={styles.hubLabel}>Assigned Branch</Text>
+                                            <Text style={styles.hubValueText}>
+                                                {branches?.find(b => b._id === courier.branchId)?.name || 'Not Assigned'}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                    
+                                    {courier.assignedTo && (
+                                        <View style={[styles.hubRow, { marginTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md }]}>
+                                            <Ionicons name="bicycle" size={18} color={colors.success} />
+                                            <View style={{ marginLeft: 12 }}>
+                                                <Text style={styles.hubLabel}>Delivery Agent</Text>
+                                                <Text style={styles.hubValueText}>
+                                                    {agents?.find(a => a._id === courier.assignedTo)?.name || "Assigned Agent"}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    )}
                                 </View>
-                            )}
+                            </View>
 
                             <View style={styles.section}>
                                 <Text style={styles.sectionTitle}>Sender</Text>
@@ -777,7 +878,7 @@ export default function CourierDetailsScreen() {
                                                 <Text style={styles.subValue}>Distance: {courier.distance} km</Text>
                                             </View>
                                             <View style={[globalStyles.spaceBetween, { marginTop: spacing.sm }]}>
-                                                <Text style={styles.value}>Total: ${courier.price.toFixed(2)}</Text>
+                                                <Text style={styles.value}>Total: ₹{courier.price.toFixed(2)}</Text>
                                                 <Pressable
                                                     onPress={() => router.push(`/couriers/${id}/invoice`)}
                                                     style={{ padding: spacing.xs }}
@@ -812,23 +913,6 @@ export default function CourierDetailsScreen() {
                                 </View>
                             </View>
 
-                            {courier.assignedTo && (
-                                <View style={[styles.section, { marginTop: spacing.md }]}>
-                                    <Text style={styles.sectionTitle}>Assigned Agent</Text>
-                                    <View style={[globalStyles.card, { flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
-                                        <View style={{ backgroundColor: colors.primary + '15', padding: 10, borderRadius: 25 }}>
-                                            <Ionicons name="bicycle" size={24} color={colors.primary} />
-                                        </View>
-                                        <View>
-                                            <Text style={[styles.value, { fontWeight: '700' }]}>
-                                                {agents?.find(a => a._id === courier.assignedTo)?.name || "Delivery Agent"}
-                                            </Text>
-                                            <Text style={styles.subValue}>Platform ID: {courier.assignedTo}</Text>
-                                        </View>
-                                    </View>
-                                </View>
-                            )}
-
                             {/* Activity Log */}
                             <ActivityLog courierId={courier._id} />
                         </>
@@ -846,7 +930,7 @@ export default function CourierDetailsScreen() {
                 <View style={styles.podOverlay}>
                     <View style={styles.podContent}>
                         <View style={styles.podHeader}>
-                            <Text style={styles.podTitle}>Delivery Confirmation</Text>
+                            <Text style={styles.podTitle}>Confirm Delivery</Text>
                             <Pressable onPress={() => setShowPodModal(false)}>
                                 <Ionicons name="close" size={24} color={colors.text} />
                             </Pressable>
@@ -873,7 +957,7 @@ export default function CourierDetailsScreen() {
                                 maxLength={4}
                             />
 
-                            <Text style={styles.podLabel}>Signature</Text>
+                            <Text style={styles.podLabel}>Digital Signature</Text>
                             <SignaturePad
                                 onOK={(sig) => setPodForm(p => ({ ...p, signature: sig }))}
                                 onEmpty={() => setPodForm(p => ({ ...p, signature: null }))}
@@ -889,7 +973,7 @@ export default function CourierDetailsScreen() {
                                     color={podForm.photo ? colors.success : colors.primary}
                                 />
                                 <Text style={[styles.photoButtonText, podForm.photo && { color: colors.success }]}>
-                                    {podForm.photo ? "Photo Captured" : "Take POD Photo (Optional)"}
+                                    {podForm.photo ? "Arrival Photo Captured" : "Take Arrival Photo (Optional)"}
                                 </Text>
                             </Pressable>
 
@@ -897,7 +981,7 @@ export default function CourierDetailsScreen() {
                                 style={[globalStyles.button, styles.podSubmit]}
                                 onPress={handlePodSubmit}
                             >
-                                <Text style={globalStyles.buttonText}>Confirm Delivery</Text>
+                                <Text style={globalStyles.buttonText}>Finalize Delivery</Text>
                             </Pressable>
                         </ScrollView>
                     </View>
@@ -913,32 +997,79 @@ export default function CourierDetailsScreen() {
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>Update Status</Text>
-                        {statusOptions.map((option) => (
-                            <Pressable
-                                key={option.value}
-                                style={[
-                                    styles.statusOption,
-                                    courier.currentStatus === option.value && styles.statusOptionActive,
-                                ]}
-                                onPress={() => handleStatusChange(option.value)}
-                            >
-                                <Text
-                                    style={[
-                                        styles.statusOptionText,
-                                        courier.currentStatus === option.value && styles.statusOptionTextActive,
-                                    ]}
-                                >
-                                    {option.label}
-                                </Text>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Update Parcel Status</Text>
+                            <Pressable onPress={() => setShowStatusModal(false)}>
+                                <Ionicons name="close" size={24} color={colors.text} />
                             </Pressable>
-                        ))}
-                        <Pressable
-                            style={[globalStyles.buttonSecondary, styles.modalCancel]}
-                            onPress={() => setShowStatusModal(false)}
-                        >
-                            <Text style={globalStyles.buttonText}>Cancel</Text>
-                        </Pressable>
+                        </View>
+                        
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            {statusOptions.map((option) => (
+                                <Pressable
+                                    key={option.value}
+                                    style={[
+                                        styles.statusOption,
+                                        courier.currentStatus === option.value && styles.statusOptionActive,
+                                    ]}
+                                    onPress={() => handleStatusChange(option.value)}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.statusOptionText,
+                                            courier.currentStatus === option.value && styles.statusOptionTextActive,
+                                        ]}
+                                    >
+                                        {option.label}
+                                    </Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Branch Selection Modal */}
+            <Modal
+                visible={showBranchModal}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowBranchModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Select Branch Hub</Text>
+                            <Pressable onPress={() => setShowBranchModal(false)}>
+                                <Ionicons name="close" size={24} color={colors.text} />
+                            </Pressable>
+                        </View>
+
+                        <FlatList
+                            data={branches}
+                            keyExtractor={(item) => item._id}
+                            showsVerticalScrollIndicator={false}
+                            renderItem={({ item }) => (
+                                <Pressable
+                                    style={styles.agentOption}
+                                    onPress={() => handleAssignBranch(item._id)}
+                                >
+                                    <View style={[styles.agentAvatar, { backgroundColor: colors.primary + '15' }]}>
+                                        <Ionicons name="business" size={20} color={colors.primary} />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.agentName}>{item.name}</Text>
+                                        <Text style={styles.agentEmail}>{item.address}</Text>
+                                    </View>
+                                    <Ionicons name="chevron-forward" size={20} color={colors.border} />
+                                </Pressable>
+                            )}
+                            ListEmptyComponent={
+                                <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                                    <Text style={{ color: colors.textMuted }}>No branch hubs found</Text>
+                                </View>
+                            }
+                        />
                     </View>
                 </View>
             </Modal>
@@ -953,18 +1084,19 @@ export default function CourierDetailsScreen() {
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Assign Delivery Agent</Text>
+                            <Text style={styles.modalTitle}>Assign Agent</Text>
                             <Pressable onPress={() => setShowAgentModal(false)}>
                                 <Ionicons name="close" size={24} color={colors.text} />
                             </Pressable>
                         </View>
 
                         <FlatList
-                            data={agents}
+                            data={agents?.filter(a => a.branchId === courier.branchId)}
                             keyExtractor={(item) => item._id}
-                            style={{ maxHeight: 400 }}
+                            showsVerticalScrollIndicator={false}
                             renderItem={({ item }) => (
                                 <Pressable
+                                    key={item._id}
                                     style={styles.agentOption}
                                     onPress={() => handleAssignAgent(item._id)}
                                 >
@@ -975,21 +1107,15 @@ export default function CourierDetailsScreen() {
                                         <Text style={styles.agentName}>{item.name}</Text>
                                         <Text style={styles.agentEmail}>{item.email}</Text>
                                     </View>
-                                    <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                                    <Ionicons name="chevron-forward" size={20} color={colors.border} />
                                 </Pressable>
                             )}
                             ListEmptyComponent={
                                 <View style={{ padding: spacing.xl, alignItems: 'center' }}>
-                                    <Text style={{ color: colors.textMuted }}>No delivery agents found</Text>
+                                    <Text style={{ color: colors.textMuted }}>No delivery agents found in this branch</Text>
                                 </View>
                             }
                         />
-                        <Pressable
-                            style={[globalStyles.buttonSecondary, styles.modalCancel]}
-                            onPress={() => setShowAgentModal(false)}
-                        >
-                            <Text style={globalStyles.buttonText}>Cancel</Text>
-                        </Pressable>
                     </View>
                 </View>
             </Modal>
@@ -1001,20 +1127,21 @@ export default function CourierDetailsScreen() {
                 animationType="fade"
                 onRequestClose={() => setShowDeleteModal(false)}
             >
-                <View style={styles.modalOverlay}>
+                <View style={[styles.modalOverlay, { justifyContent: 'center' }]}>
                     <View style={styles.deleteModalContent}>
-                        <Text style={styles.deleteModalTitle}>Delete Courier</Text>
+                        <Ionicons name="trash-outline" size={48} color={colors.error} style={{ alignSelf: 'center', marginBottom: spacing.md }} />
+                        <Text style={styles.deleteModalTitle}>Remove Courier?</Text>
                         <Text style={styles.deleteModalMessage}>
-                            Are you sure you want to delete this courier? This action cannot be undone.
+                            This action is permanent and will remove all tracking history for this parcel.
                         </Text>
                         <View style={styles.deleteModalButtons}>
                             <Pressable
                                 style={[globalStyles.buttonSecondary, { flex: 1 }]}
                                 onPress={() => setShowDeleteModal(false)}
                             >
-                                <Text style={globalStyles.buttonText}>Cancel</Text>
+                                <Text style={globalStyles.buttonText}>Keep It</Text>
                             </Pressable>
-                            <View style={{ width: spacing.sm }} />
+                            <View style={{ width: spacing.md }} />
                             <Pressable
                                 style={[globalStyles.button, styles.deleteConfirmButton, { flex: 1 }]}
                                 onPress={confirmDelete}
@@ -1034,11 +1161,94 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingHorizontal: spacing.md,
     },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.md,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+        backgroundColor: colors.background,
+        height: 64,
+    },
+    headerTitle: {
+        fontSize: fontSize.lg,
+        fontWeight: 'bold',
+        color: colors.text,
+        flex: 1,
+        textAlign: 'center',
+    },
+    headerActions: {
+        width: 44,
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+    },
+    actionIconButton: {
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: -spacing.sm,
+    },
+    backButtonContainer: {
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.surface,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
     statusSection: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         marginVertical: spacing.md,
+    },
+    assignButton: {
+        backgroundColor: colors.success,
+    },
+    actionsContainerVertical: {
+        marginBottom: spacing.xl,
+        gap: spacing.sm,
+    },
+    actionsRow: {
+        flexDirection: 'row',
+        gap: spacing.sm,
+    },
+    actionButtonSplit: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.primary,
+        paddingVertical: spacing.md,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+    },
+    fullWidthButton: {
+        width: '100%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.surface,
+        paddingVertical: spacing.md,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    actionButtonTextSmall: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
+    actionButtonText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 15,
     },
     statusButton: {
         paddingVertical: spacing.xs + 2,
@@ -1089,56 +1299,76 @@ const styles = StyleSheet.create({
     },
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.7)',
+        backgroundColor: 'rgba(0,0,0,0.9)',
         justifyContent: 'flex-end',
     },
     modalContent: {
-        backgroundColor: colors.surface,
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
+        backgroundColor: colors.background,
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
         padding: spacing.lg,
+        borderWidth: 1,
+        borderColor: colors.border,
+        maxHeight: '90%',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: spacing.xl,
+        paddingBottom: spacing.md,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
     },
     modalTitle: {
-        fontSize: fontSize.lg,
-        fontWeight: '600',
+        fontSize: fontSize.xl,
+        fontWeight: 'bold',
         color: colors.text,
-        marginBottom: spacing.md,
-        textAlign: 'center',
+        letterSpacing: -0.5,
     },
-    statusOption: {
-        paddingVertical: spacing.md,
-        paddingHorizontal: spacing.md,
-        borderRadius: 10,
-        marginBottom: spacing.xs,
-        backgroundColor: colors.surfaceElevated,
+    podOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.9)',
+        justifyContent: 'flex-end',
     },
-    statusOptionActive: {
-        backgroundColor: colors.primary,
+    podContent: {
+        backgroundColor: colors.background,
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
+        padding: spacing.lg,
+        height: '90%',
+        borderWidth: 1,
+        borderColor: colors.border,
     },
-    statusOptionText: {
-        fontSize: fontSize.md,
+    podHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: spacing.xl,
+        paddingBottom: spacing.md,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+    },
+    podTitle: {
+        fontSize: fontSize.xl,
+        fontWeight: 'bold',
         color: colors.text,
-        textAlign: 'center',
-    },
-    statusOptionTextActive: {
-        fontWeight: '600',
-        color: '#fff',
-    },
-    modalCancel: {
-        marginTop: spacing.md,
+        letterSpacing: -0.5,
     },
     deleteModalContent: {
         backgroundColor: colors.surface,
-        borderRadius: 16,
-        padding: spacing.lg,
+        borderRadius: 24,
+        padding: spacing.xl,
         marginHorizontal: spacing.lg,
         maxWidth: 400,
         alignSelf: 'center',
         width: '100%',
+        borderWidth: 1,
+        borderColor: colors.border,
     },
     deleteModalTitle: {
-        fontSize: fontSize.lg,
-        fontWeight: '600',
+        fontSize: fontSize.xl,
+        fontWeight: 'bold',
         color: colors.text,
         marginBottom: spacing.sm,
         textAlign: 'center',
@@ -1146,214 +1376,66 @@ const styles = StyleSheet.create({
     deleteModalMessage: {
         fontSize: fontSize.md,
         color: colors.textSecondary,
-        marginBottom: spacing.lg,
+        marginBottom: spacing.xl,
         textAlign: 'center',
-        lineHeight: 22,
+        lineHeight: 24,
     },
-    deleteModalButtons: {
-        flexDirection: 'row',
-    },
-    deleteConfirmButton: {
-        backgroundColor: colors.error,
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
+    statusOption: {
+        paddingVertical: spacing.lg,
         paddingHorizontal: spacing.md,
-        paddingVertical: spacing.md,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-        backgroundColor: colors.background,
-    },
-    backButton: {
-        padding: spacing.xs,
-        marginLeft: -spacing.xs,
-    },
-    headerTitle: {
-        fontSize: fontSize.lg,
-        fontWeight: '600',
-        color: colors.text,
-    },
-    branchHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: spacing.md,
-        gap: 6,
-    },
-    branchHeaderText: {
-        fontSize: fontSize.xs,
-        fontWeight: '600',
-        color: colors.textSecondary,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    podOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.8)',
-        justifyContent: 'flex-end',
-    },
-    podContent: {
-        backgroundColor: colors.background,
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        padding: spacing.lg,
-        height: '85%',
-    },
-    podHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: spacing.lg,
-    },
-    podTitle: {
-        fontSize: fontSize.xl,
-        fontWeight: 'bold',
-        color: colors.text,
-    },
-    podLabel: {
-        fontSize: fontSize.sm,
-        fontWeight: '600',
-        color: colors.textSecondary,
-        marginTop: spacing.md,
-        marginBottom: spacing.xs,
-    },
-    photoButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: spacing.md,
-        borderRadius: 12,
+        borderRadius: 16,
+        marginBottom: spacing.sm,
+        backgroundColor: colors.surface,
         borderWidth: 1,
+        borderColor: colors.border,
+    },
+    statusOptionActive: {
+        backgroundColor: colors.primary + '20',
         borderColor: colors.primary,
-        borderStyle: 'dashed',
-        marginTop: spacing.lg,
-        gap: 8,
     },
-    photoButtonActive: {
-        borderColor: colors.success,
-        backgroundColor: colors.success + '10',
-    },
-    photoButtonText: {
-        color: colors.primary,
-        fontWeight: '600',
-    },
-    podSubmit: {
-        marginTop: spacing.xl,
-        marginBottom: spacing.xl,
-    },
-    backButtonContainer: {
-        width: 44,
-        height: 44,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: colors.surface,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    assignButton: {
-        backgroundColor: (colors as any).success || '#27ae60',
-    },
-    actionsContainer: {
-        flexDirection: 'row',
-        gap: spacing.sm,
-        marginBottom: spacing.lg,
-    },
-    actionButton: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: colors.primary,
-        paddingVertical: spacing.md,
-        borderRadius: 12,
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-    },
-    actionButtonText: {
-        color: '#fff',
-        fontWeight: 'bold',
+    statusOptionText: {
         fontSize: fontSize.md,
+        color: colors.textSecondary,
+        textAlign: 'center',
+        fontWeight: '500',
     },
-    secondaryActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: colors.surface,
-        borderRadius: 12,
-        padding: spacing.sm,
-        marginBottom: spacing.xl,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    secondaryAction: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: spacing.sm,
-    },
-    secondaryActionText: {
-        fontSize: fontSize.sm,
-        fontWeight: '600',
-    },
-    divider: {
-        width: 1,
-        height: 20,
-        backgroundColor: colors.border,
-    },
-    headerActions: {
-        width: 44,
-        alignItems: 'flex-end',
-    },
-    actionIconButton: {
-        width: 40,
-        height: 40,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    modalHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: spacing.lg,
+    statusOptionTextActive: {
+        fontWeight: '700',
+        color: colors.primary,
     },
     agentOption: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: spacing.md,
+        padding: spacing.lg,
         backgroundColor: colors.surface,
-        borderRadius: 12,
+        borderRadius: 16,
         marginBottom: spacing.sm,
         borderWidth: 1,
         borderColor: colors.border,
         gap: 12,
     },
     agentAvatar: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: colors.primary,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: colors.primary + '15',
         alignItems: 'center',
         justifyContent: 'center',
     },
     agentAvatarText: {
-        color: '#fff',
+        color: colors.primary,
         fontWeight: 'bold',
-        fontSize: 16,
+        fontSize: 18,
     },
     agentName: {
         fontSize: fontSize.md,
-        fontWeight: '600',
+        fontWeight: 'bold',
         color: colors.text,
     },
     agentEmail: {
-        fontSize: fontSize.xs,
-        color: colors.textSecondary,
+        fontSize: fontSize.sm,
+        color: colors.textMuted,
+        marginTop: 2,
     },
     unauthorizedContainer: {
         flex: 1,
@@ -1416,6 +1498,24 @@ const styles = StyleSheet.create({
         fontSize: fontSize.xs,
         color: colors.textSecondary,
     },
+    branchChipSmall: {
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+        backgroundColor: colors.surface,
+        borderWidth: 1,
+        borderColor: colors.border,
+        marginRight: spacing.xs,
+    },
+    branchChipSmallText: {
+        fontSize: 12,
+        color: colors.textSecondary,
+    },
+    errorTextSmall: {
+        fontSize: 10,
+        color: colors.error,
+        marginTop: 2,
+    },
     expressBadge: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1443,17 +1543,22 @@ const styles = StyleSheet.create({
     statusBarBackground: {
         position: 'absolute',
         top: 25,
-        left: 20,
-        right: 20,
+        left: 30, // center of first step (60/2)
+        right: 30, // center of last step (60/2)
         height: 4,
         backgroundColor: colors.border,
         borderRadius: 2,
     },
-    statusBarFill: {
+    statusBarFillContainer: {
         position: 'absolute',
         top: 25,
-        left: 20,
+        left: 30,
+        right: 30,
         height: 4,
+        zIndex: 0,
+    },
+    statusBarFill: {
+        height: '100%',
         backgroundColor: colors.primary,
         borderRadius: 2,
     },
@@ -1490,5 +1595,63 @@ const styles = StyleSheet.create({
     stepLabelActive: {
         color: colors.primary,
         fontWeight: '700',
+    },
+    assignButton: {
+        backgroundColor: colors.success,
+    },
+    actionsContainerVertical: {
+        marginBottom: spacing.xl,
+        gap: spacing.sm,
+    },
+    actionsRow: {
+        flexDirection: 'row',
+        gap: spacing.sm,
+    },
+    actionButtonSplit: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.primary,
+        paddingVertical: spacing.md,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+    },
+    fullWidthButton: {
+        width: '100%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.surface,
+        paddingVertical: spacing.md,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    actionButtonTextSmall: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
+    actionButtonText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 15,
+    },
+    hubRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    hubLabel: {
+        fontSize: 10,
+        color: colors.textSecondary,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    hubValueText: {
+        fontSize: fontSize.md,
+        color: '#fff',
+        fontWeight: '600',
     },
 });

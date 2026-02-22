@@ -7,3 +7,4 @@ export * from './activity-log';
 export { AuthProvider, useAuth } from './auth-context';
 export { SignaturePad } from './signature-pad';
 export { Logo } from './logo';
+export { AnalyticsChart } from './analytics-charts';

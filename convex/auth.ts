@@ -27,7 +27,7 @@ export const register = mutation({
         name: v.string(),
         email: v.string(),
         password: v.string(),
-        role: v.union(v.literal("admin"), v.literal("agent"), v.literal("customer")),
+        role: v.literal("customer"),
         phone: v.optional(v.string()),
     },
     handler: async (ctx, args) => {

@@ -65,13 +65,13 @@ export const generateAndShareInvoice = async (courier: any, invoiceNumber: strin
                     <td>${courier.trackingId}</td>
                     <td>${courier.weight} kg</td>
                     <td>${courier.distance} km</td>
-                    <td>$${courier.price}</td>
+                    <td>₹${courier.price}</td>
                 </tr>
             </tbody>
         </table>
 
         <div class="total">
-            Total: $${courier.price}
+            Total: ₹${courier.price}
         </div>
 
         <div class="footer">

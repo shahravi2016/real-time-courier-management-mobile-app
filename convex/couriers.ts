@@ -21,8 +21,15 @@ function generateInvoiceNumber(): string {
 
 // List all couriers (realtime subscription)
 export const list = query({
-    args: {},
-    handler: async (ctx) => {
+    args: { branchId: v.optional(v.id("branches")) },
+    handler: async (ctx, args) => {
+        if (args.branchId) {
+            return await ctx.db
+                .query("couriers")
+                .withIndex("by_branchId", (q) => q.eq("branchId", args.branchId))
+                .order("desc")
+                .collect();
+        }
         return await ctx.db
             .query("couriers")
             .order("desc")
@@ -88,11 +95,19 @@ export const getMyCouriers = query({
     },
 });
 
-// Get dashboard stats
+// Get general stats (optionally filtered by branch)
 export const getStats = query({
-    args: {},
-    handler: async (ctx) => {
-        const all = await ctx.db.query("couriers").collect();
+    args: { branchId: v.optional(v.id("branches")) },
+    handler: async (ctx, args) => {
+        let all;
+        if (args.branchId) {
+            all = await ctx.db
+                .query("couriers")
+                .withIndex("by_branchId", (q) => q.eq("branchId", args.branchId))
+                .collect();
+        } else {
+            all = await ctx.db.query("couriers").collect();
+        }
 
         const stats = {
             total: all.length,
@@ -111,6 +126,111 @@ export const getStats = query({
     },
 });
 
+// Admin Dashboard Stats: global and branch comparison
+export const getAdminDashboardStats = query({
+    args: {},
+    handler: async (ctx) => {
+        const allCouriers = await ctx.db.query("couriers").collect();
+        const allBranches = await ctx.db.query("branches").collect();
+
+        // 1. Branch Contribution (Pie Chart Data)
+        const branchContribution = allBranches.map(b => {
+            const branchCouriers = allCouriers.filter(c => c.branchId === b._id);
+            return {
+                name: b.name,
+                count: branchCouriers.length,
+                revenue: branchCouriers
+                    .filter(c => c.currentStatus === "delivered")
+                    .reduce((sum, c) => sum + (c.price || 0), 0)
+            };
+        });
+
+        // 2. Orders for current month (Graph Data - daily for last 30 days or weekly)
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+        const monthlyOrders = allCouriers
+            .filter(c => c.createdAt >= startOfMonth)
+            .reduce((acc: any, c) => {
+                const day = new Date(c.createdAt).getDate();
+                acc[day] = (acc[day] || 0) + 1;
+                return acc;
+            }, {});
+
+        // 3. Revenue Trends (Graph Data)
+        const revenueTrends = allCouriers
+            .filter(c => c.currentStatus === "delivered" && c.createdAt >= startOfMonth)
+            .reduce((acc: any, c) => {
+                const day = new Date(c.createdAt).getDate();
+                acc[day] = (acc[day] || 0) + (c.price || 0);
+                return acc;
+            }, {});
+
+        return {
+            global: {
+                total: allCouriers.length,
+                revenue: allCouriers
+                    .filter(c => c.currentStatus === "delivered")
+                    .reduce((sum, c) => sum + (c.price || 0), 0),
+            },
+            branchContribution,
+            monthlyOrders,
+            revenueTrends
+        };
+    },
+});
+
+// Branch Manager Dashboard Stats
+export const getBranchDashboardStats = query({
+    args: { branchId: v.id("branches") },
+    handler: async (ctx, args) => {
+        const myCouriers = await ctx.db
+            .query("couriers")
+            .withIndex("by_branchId", (q) => q.eq("branchId", args.branchId))
+            .collect();
+
+        // 1. Status distribution (Pie Chart Data)
+        const statusCounts = {
+            booked: myCouriers.filter(c => c.currentStatus === "booked").length,
+            inTransit: myCouriers.filter(c => c.currentStatus === "in_transit" || c.currentStatus === "dispatched").length,
+            outForDelivery: myCouriers.filter(c => c.currentStatus === "out_for_delivery").length,
+            delivered: myCouriers.filter(c => c.currentStatus === "delivered").length,
+        };
+
+        // 2. Orders for current month for this branch
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+        const monthlyOrders = myCouriers
+            .filter(c => c.createdAt >= startOfMonth)
+            .reduce((acc: any, c) => {
+                const day = new Date(c.createdAt).getDate();
+                acc[day] = (acc[day] || 0) + 1;
+                return acc;
+            }, {});
+
+        // 3. Branch Revenue
+        const branchRevenue = myCouriers
+            .filter(c => c.currentStatus === "delivered")
+            .reduce((sum, c) => sum + (c.price || 0), 0);
+
+        const revenueTrends = myCouriers
+            .filter(c => c.currentStatus === "delivered" && c.createdAt >= startOfMonth)
+            .reduce((acc: any, c) => {
+                const day = new Date(c.createdAt).getDate();
+                acc[day] = (acc[day] || 0) + (c.price || 0);
+                return acc;
+            }, {});
+
+        return {
+            statusCounts,
+            monthlyOrders,
+            branchRevenue,
+            revenueTrends
+        };
+    },
+});
+
 // Get Agent specific stats
 export const getAgentStats = query({
     args: { userId: v.id("users") },
@@ -126,9 +246,9 @@ export const getAgentStats = query({
             totalJobs: myJobs.length,
             activeJobs: myJobs.filter(j => !["delivered", "cancelled"].includes(j.currentStatus)).length,
             completedJobs: completed.length,
-            // Assuming 20% commission for the agent for demo purposes
-            earnings: completed.reduce((sum, j) => sum + ((j.price || 0) * 0.2), 0),
-            target: 50, // Mock target
+            // Assuming 10% commission for the agent for demo purposes
+            earnings: completed.reduce((sum, j) => sum + ((j.price || 0) * 0.1), 0),
+            target: completed.length + 10, // Dynamic target based on performance
         };
     },
 });
@@ -372,7 +492,7 @@ export const assignCourier = mutation({
 
         await ctx.db.patch(args.id, {
             assignedTo: args.userId,
-            currentStatus: "in_transit",
+            currentStatus: "out_for_delivery",
             updatedAt: Date.now(),
         });
 
@@ -380,7 +500,7 @@ export const assignCourier = mutation({
             courierId: args.id,
             trackingId: courier.trackingId,
             action: "assigned",
-            description: `Assigned to agent: ${user.name}`,
+            description: `Assigned to agent: ${user.name} (Status: Out for Delivery)`,
             timestamp: Date.now(),
         });
     },
@@ -401,8 +521,14 @@ export const completeDelivery = mutation({
         const courier = await ctx.db.get(args.id);
         if (!courier) throw new Error("Courier not found");
 
-        if (courier.otpCode && courier.otpCode !== args.otpCode) {
-            throw new Error("Invalid OTP code. Delivery cannot be completed.");
+        // Robust OTP verification
+        if (courier.otpCode) {
+            const dbOtp = String(courier.otpCode).replace(/\D/g, '');
+            const inputOtp = String(args.otpCode).replace(/\D/g, '');
+            
+            if (dbOtp !== inputOtp) {
+                throw new Error(`Invalid OTP code. Please enter the correct 4-digit security code shown on the customer's tracking screen.`);
+            }
         }
 
         // Auth check: If it's a mutation call, we usually check auth via ctx.auth 

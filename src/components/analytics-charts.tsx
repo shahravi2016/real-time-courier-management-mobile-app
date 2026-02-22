@@ -1,0 +1,216 @@
+import React from 'react';
+import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { colors, spacing, fontSize } from '../styles/theme';
+
+interface DataPoint {
+    label: string;
+    value: number;
+    color?: string;
+}
+
+interface ChartProps {
+    title: string;
+    data: DataPoint[];
+    type?: 'bar' | 'horizontal-bar' | 'pie';
+    suffix?: string;
+}
+
+export const AnalyticsChart: React.FC<ChartProps> = ({ title, data, type = 'bar', suffix = '' }) => {
+    const maxValue = Math.max(...data.map(d => d.value), 1);
+    const totalValue = data.reduce((sum, d) => sum + d.value, 0);
+
+    return (
+        <View style={styles.container}>
+            <Text style={styles.title}>{title}</Text>
+            
+            {type === 'bar' ? (
+                // ... (previous bar logic remains same)
+                <View style={styles.barChart}>
+                    {data.map((item, index) => (
+                        <View key={index} style={styles.barContainer}>
+                            <View style={styles.barWrapper}>
+                                <View 
+                                    style={[
+                                        styles.bar, 
+                                        { 
+                                            height: `${(item.value / maxValue) * 100}%`,
+                                            backgroundColor: item.color || colors.primary
+                                        }
+                                    ]} 
+                                />
+                            </View>
+                            <Text style={styles.barLabel} numberOfLines={1}>{item.label}</Text>
+                        </View>
+                    ))}
+                </View>
+            ) : type === 'horizontal-bar' ? (
+                <View style={styles.horizontalChart}>
+                    {data.map((item, index) => (
+                        <View key={index} style={styles.hBarRow}>
+                            <View style={styles.hBarLabelContainer}>
+                                <Text style={styles.hBarLabel}>{item.label}</Text>
+                                <Text style={styles.hBarValue}>{item.value}{suffix}</Text>
+                            </View>
+                            <View style={styles.hBarBg}>
+                                <View 
+                                    style={[
+                                        styles.hBarFill, 
+                                        { 
+                                            width: `${(item.value / maxValue) * 100}%`,
+                                            backgroundColor: item.color || colors.primary
+                                        }
+                                    ]} 
+                                />
+                            </View>
+                        </View>
+                    ))}
+                </View>
+            ) : (
+                /* Pie Chart Alternative: Segmented Contribution Bar */
+                <View style={styles.pieContainer}>
+                    <View style={styles.segmentedBar}>
+                        {data.map((item, index) => (
+                            <View 
+                                key={index} 
+                                style={[
+                                    styles.segment, 
+                                    { 
+                                        flex: item.value || 0.0001, 
+                                        backgroundColor: item.color || (index === 0 ? colors.primary : index === 1 ? colors.success : colors.warning) 
+                                    }
+                                ]} 
+                            />
+                        ))}
+                    </View>
+                    <View style={styles.legendContainer}>
+                        {data.map((item, index) => (
+                            <View key={index} style={styles.legendItem}>
+                                <View style={[styles.legendColor, { backgroundColor: item.color || (index === 0 ? colors.primary : index === 1 ? colors.success : colors.warning) }]} />
+                                <Text style={styles.legendLabel}>{item.label}</Text>
+                                <Text style={styles.legendValue}>
+                                    {suffix}{item.value} ({totalValue > 0 ? ((item.value / totalValue) * 100).toFixed(1) : 0}%)
+                                </Text>
+                            </View>
+                        ))}
+                    </View>
+                </View>
+            )}
+        </View>
+    );
+};
+
+const styles = StyleSheet.create({
+    container: {
+        backgroundColor: colors.surface,
+        borderRadius: 16,
+        padding: spacing.md,
+        marginVertical: spacing.sm,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    title: {
+        fontSize: fontSize.md,
+        fontWeight: 'bold',
+        color: colors.text,
+        marginBottom: spacing.lg,
+    },
+    barChart: {
+        flexDirection: 'row',
+        height: 150,
+        alignItems: 'flex-end',
+        justifyContent: 'space-around',
+        paddingBottom: 20,
+    },
+    barContainer: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    barWrapper: {
+        height: '100%',
+        width: 12,
+        backgroundColor: colors.border + '50',
+        borderRadius: 6,
+        justifyContent: 'flex-end',
+        overflow: 'hidden',
+    },
+    bar: {
+        width: '100%',
+        borderRadius: 6,
+    },
+    barLabel: {
+        fontSize: 10,
+        color: colors.textMuted,
+        marginTop: 6,
+        position: 'absolute',
+        bottom: -20,
+    },
+    horizontalChart: {
+        gap: spacing.md,
+    },
+    hBarRow: {
+        gap: 6,
+    },
+    hBarLabelContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    hBarLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: colors.textSecondary,
+    },
+    hBarValue: {
+        fontSize: 12,
+        fontWeight: 'bold',
+        color: colors.primary,
+    },
+    hBarBg: {
+        height: 8,
+        backgroundColor: colors.border + '50',
+        borderRadius: 4,
+        overflow: 'hidden',
+    },
+    hBarFill: {
+        height: '100%',
+        borderRadius: 4,
+    },
+    pieContainer: {
+        gap: spacing.lg,
+    },
+    segmentedBar: {
+        height: 24,
+        flexDirection: 'row',
+        borderRadius: 12,
+        overflow: 'hidden',
+        backgroundColor: colors.border + '30',
+    },
+    segment: {
+        height: '100%',
+    },
+    legendContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: spacing.md,
+    },
+    legendItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    legendColor: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+    },
+    legendLabel: {
+        fontSize: 12,
+        color: colors.textSecondary,
+    },
+    legendValue: {
+        fontSize: 12,
+        fontWeight: 'bold',
+        color: colors.text,
+        marginLeft: 2,
+    },
+});

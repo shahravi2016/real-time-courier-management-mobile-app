@@ -417,9 +417,9 @@ export default function AddCourierScreen() {
                     {calculatedPrice !== null && (
                         <View style={styles.pricePreview}>
                             <Text style={styles.priceLabel}>Estimated Price</Text>
-                            <Text style={styles.priceValue}>${calculatedPrice.toFixed(2)}</Text>
+                            <Text style={styles.priceValue}>₹{calculatedPrice.toFixed(2)}</Text>
                             <Text style={styles.priceBreakdown}>
-                                Base: $10 + Weight: ${((parseFloat(form.weight) || 0) * 5).toFixed(2)} + Distance: ${((parseFloat(form.distance) || 0) * 2).toFixed(2)}
+                                Base: ₹10 + Weight: ₹{((parseFloat(form.weight) || 0) * 5).toFixed(2)} + Distance: ₹{((parseFloat(form.distance) || 0) * 2).toFixed(2)}
                             </Text>
                         </View>
                     )}

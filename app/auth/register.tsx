@@ -8,8 +8,6 @@ import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme'
 import { Ionicons } from '@expo/vector-icons';
 
 const ROLES = [
-    { label: 'Admin', value: 'admin' },
-    { label: 'Agent (Delivery)', value: 'agent' },
     { label: 'Customer', value: 'customer' },
 ] as const;
 
@@ -22,7 +20,7 @@ export default function RegisterScreen() {
         email: '',
         password: '',
         phone: '',
-        role: 'agent' as 'admin' | 'agent' | 'customer',
+        role: 'customer' as 'customer',
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
 
