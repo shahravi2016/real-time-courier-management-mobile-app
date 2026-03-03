@@ -40,7 +40,14 @@ function RootNavigator() {
                 },
                 animation: 'slide_from_right',
             }}
-        />
+        >
+            <Stack.Screen name="couriers/index" options={{ headerShown: false }} />
+            <Stack.Screen name="couriers/[id]" options={{ headerShown: false }} />
+            <Stack.Screen name="couriers/add" options={{ headerShown: false }} />
+            <Stack.Screen name="couriers/[id]/invoice" options={{ headerShown: false }} />
+            <Stack.Screen name="auth/login" options={{ headerShown: false }} />
+            <Stack.Screen name="auth/register" options={{ headerShown: false }} />
+        </Stack>
     );
 }
 

@@ -31,9 +31,10 @@ yarn-error.*
 *.pem
 
 # local env files
-.env*.local
 .env.local
 .env
+/.idea
+/image-33.jpeg
 solve-error.md
 next-goal.md
 GEMINI.md

@@ -36,12 +36,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         const loadSession = async () => {
             try {
-                const stored = await AsyncStorage.getItem(SESSION_KEY);
-                if (stored) {
-                    setUser(JSON.parse(stored));
-                }
+                // FORCE LOGOUT ON EVERY APP STARTUP AS PER REQUEST
+                await AsyncStorage.removeItem(SESSION_KEY);
+                setUser(null);
             } catch (e) {
-                console.error('Failed to load session:', e);
+                console.error('Failed to clear session:', e);
             } finally {
                 setIsLoading(false);
             }

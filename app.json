@@ -19,9 +19,10 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0A0A0B"
+        "backgroundColor": "#000000"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.ravishah10.couriermanager"
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -29,6 +30,12 @@
     },
     "plugins": [
       "expo-router"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ac1324d0-01b9-445b-87e2-cb57fce4f8a6"
+      }
+    }
   }
 }

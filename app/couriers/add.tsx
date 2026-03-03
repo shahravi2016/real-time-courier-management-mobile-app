@@ -186,7 +186,7 @@ export default function AddCourierScreen() {
 
             <View style={styles.header}>
                 <Pressable
-                    onPress={() => router.back()}
+                    onPress={() => router.canGoBack() ? router.back() : router.replace('/')}
                     style={({ pressed }) => [
                         styles.backButtonContainer,
                         pressed && { opacity: 0.6 }

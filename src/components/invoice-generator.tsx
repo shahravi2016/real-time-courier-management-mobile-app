@@ -9,6 +9,10 @@ interface InvoiceProps {
 }
 
 export const generateAndShareInvoice = async (courier: any, invoiceNumber: string) => {
+    const isExpress = courier.deliveryType === 'express';
+    const subtotal = (courier.weight || 0) * 5 + (courier.distance || 0) * 2 + 10;
+    const expressSurcharge = isExpress ? subtotal * 0.5 : 0;
+
     const html = `
     <html>
       <head>
@@ -25,14 +29,15 @@ export const generateAndShareInvoice = async (courier: any, invoiceNumber: strin
             .table th { background-color: #f8f9fa; font-weight: bold; }
             .total { text-align: right; font-size: 20px; font-weight: bold; }
             .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #666; }
+            .surcharge { color: #e67e22; font-weight: bold; }
         </style>
       </head>
       <body>
         <div class="header">
-            <div class="logo">COURIER MANAGER</div>
+            <div class="logo">COURIER EXPRESS</div>
             <div class="invoice-title">INVOICE</div>
             <div>Invoice #: ${invoiceNumber}</div>
-            <div>Date: ${new Date().toLocaleDateString()}</div>
+            <div>Date: ${new Date(courier.createdAt).toLocaleDateString()}</div>
         </div>
 
         <div class="details">
@@ -53,30 +58,43 @@ export const generateAndShareInvoice = async (courier: any, invoiceNumber: strin
             <thead>
                 <tr>
                     <th>Description</th>
-                    <th>Tracking ID</th>
-                    <th>Weight</th>
-                    <th>Distance</th>
+                    <th>Rate</th>
                     <th>Amount</th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
-                    <td>Courier Delivery Service</td>
-                    <td>${courier.trackingId}</td>
-                    <td>${courier.weight} kg</td>
-                    <td>${courier.distance} km</td>
-                    <td>₹${courier.price}</td>
+                    <td>Base Fare</td>
+                    <td>₹10.00</td>
+                    <td>₹10.00</td>
                 </tr>
+                <tr>
+                    <td>Shipping Charges (Weight: ${courier.weight}kg)</td>
+                    <td>₹5.00/kg</td>
+                    <td>₹${((courier.weight || 0) * 5).toFixed(2)}</td>
+                </tr>
+                <tr>
+                    <td>Distance Charges (${courier.distance}km)</td>
+                    <td>₹2.00/km</td>
+                    <td>₹${((courier.distance || 0) * 2).toFixed(2)}</td>
+                </tr>
+                ${isExpress ? `
+                <tr>
+                    <td class="surcharge">Express Delivery Surcharge (50%)</td>
+                    <td>-</td>
+                    <td class="surcharge">₹${expressSurcharge.toFixed(2)}</td>
+                </tr>
+                ` : ''}
             </tbody>
         </table>
 
         <div class="total">
-            Total: ₹${courier.price}
+            Total: ₹${(courier.price || 0).toFixed(2)}
         </div>
 
         <div class="footer">
             <p>Thank you for your business!</p>
-            <p>Terms & Conditions Apply.</p>
+            <p>Tracking ID: ${courier.trackingId} | Status: ${courier.currentStatus}</p>
         </div>
       </body>
     </html>

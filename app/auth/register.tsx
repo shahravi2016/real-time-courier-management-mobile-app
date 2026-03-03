@@ -77,7 +77,7 @@ export default function RegisterScreen() {
             <Stack.Screen options={{ headerShown: false }} />
 
             <View style={styles.header}>
-                <Pressable onPress={() => router.back()} style={styles.backButton}>
+                <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/auth/login')} style={styles.backButton}>
                     <Ionicons name="arrow-back" size={24} color={colors.text} />
                 </Pressable>
                 <Text style={styles.headerTitle}>Create Account</Text>

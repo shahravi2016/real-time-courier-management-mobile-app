@@ -23,7 +23,11 @@ export const AnalyticsChart: React.FC<ChartProps> = ({ title, data, type = 'bar'
         <View style={styles.container}>
             <Text style={styles.title}>{title}</Text>
             
-            {type === 'bar' ? (
+            {data.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyText}>No data available for this period</Text>
+                </View>
+            ) : type === 'bar' ? (
                 // ... (previous bar logic remains same)
                 <View style={styles.barChart}>
                     {data.map((item, index) => (
@@ -212,5 +216,19 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         color: colors.text,
         marginLeft: 2,
+    },
+    emptyContainer: {
+        height: 150,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderStyle: 'dashed',
+        borderRadius: 12,
+    },
+    emptyText: {
+        fontSize: fontSize.sm,
+        color: colors.textMuted,
+        fontStyle: 'italic',
     },
 });

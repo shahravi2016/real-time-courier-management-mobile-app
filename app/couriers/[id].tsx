@@ -407,7 +407,10 @@ export default function CourierDetailsScreen() {
             <SafeAreaView style={globalStyles.safeArea}>
                 <Stack.Screen options={{ headerShown: false }} />
                 <View style={styles.header}>
-                    <Pressable onPress={() => router.back()} style={styles.backButtonContainer}>
+                    <Pressable 
+                        onPress={() => router.canGoBack() ? router.back() : router.replace('/')} 
+                        style={styles.backButtonContainer}
+                    >
                         <Ionicons name="arrow-back" size={24} color={colors.text} />
                     </Pressable>
                     <Text style={styles.headerTitle}>Details</Text>
@@ -425,7 +428,10 @@ export default function CourierDetailsScreen() {
             <SafeAreaView style={globalStyles.safeArea}>
                 <Stack.Screen options={{ headerShown: false }} />
                 <View style={styles.header}>
-                    <Pressable onPress={() => router.back()} style={styles.backButtonContainer}>
+                    <Pressable 
+                        onPress={() => router.canGoBack() ? router.back() : router.replace('/')} 
+                        style={styles.backButtonContainer}
+                    >
                         <Ionicons name="arrow-back" size={24} color={colors.text} />
                     </Pressable>
                     <Text style={styles.headerTitle}>Access Denied</Text>
@@ -460,10 +466,12 @@ export default function CourierDetailsScreen() {
 
     return (
         <SafeAreaView style={globalStyles.safeArea}>
+            <Stack.Screen options={{ headerShown: false }} />
+            
             {/* Header */}
             <View style={styles.header}>
                 <Pressable
-                    onPress={() => router.back()}
+                    onPress={() => router.canGoBack() ? router.back() : router.replace('/')}
                     style={({ pressed }) => [
                         styles.backButtonContainer,
                         pressed && { opacity: 0.6 }
@@ -759,7 +767,9 @@ export default function CourierDetailsScreen() {
                                                 }}
                                             >
                                                 <Ionicons name="person-add-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
-                                                <Text style={styles.actionButtonTextSmall}>Assign Agent</Text>
+                                                <Text style={styles.actionButtonTextSmall}>
+                                                    {courier.assignedTo ? 'Re-assign Agent' : 'Assign Agent'}
+                                                </Text>
                                             </Pressable>
                                         )}
 
@@ -1136,10 +1146,10 @@ export default function CourierDetailsScreen() {
                         </Text>
                         <View style={styles.deleteModalButtons}>
                             <Pressable
-                                style={[globalStyles.buttonSecondary, { flex: 1 }]}
+                                style={[globalStyles.buttonSecondary, { flex: 1, borderColor: colors.textMuted }]}
                                 onPress={() => setShowDeleteModal(false)}
                             >
-                                <Text style={globalStyles.buttonText}>Keep It</Text>
+                                <Text style={globalStyles.buttonSecondaryText}>Keep It</Text>
                             </Pressable>
                             <View style={{ width: spacing.md }} />
                             <Pressable
@@ -1379,6 +1389,14 @@ const styles = StyleSheet.create({
         marginBottom: spacing.xl,
         textAlign: 'center',
         lineHeight: 24,
+    },
+    deleteModalButtons: {
+        flexDirection: 'row',
+        marginTop: spacing.sm,
+    },
+    deleteConfirmButton: {
+        backgroundColor: colors.error,
+        borderColor: colors.error,
     },
     statusOption: {
         paddingVertical: spacing.lg,

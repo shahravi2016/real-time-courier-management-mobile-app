@@ -134,6 +134,43 @@ export const updateBranch = mutation({
     },
 });
 
+export const updateManager = mutation({
+    args: {
+        id: v.id("users"),
+        name: v.optional(v.string()),
+        email: v.optional(v.string()),
+        password: v.optional(v.string()),
+        branchId: v.optional(v.id("branches")),
+    },
+    handler: async (ctx, args) => {
+        const { id, ...updates } = args;
+        const user = await ctx.db.get(id);
+        if (!user) throw new Error("User not found");
+
+        // If email is being changed, check for duplicates
+        if (updates.email && updates.email !== user.email) {
+            const existing = await ctx.db
+                .query("users")
+                .withIndex("by_email", (q) => q.eq("email", updates.email!))
+                .first();
+            if (existing) throw new Error("Email already registered");
+        }
+
+        // If branch is being changed, update the old and new branches
+        if (updates.branchId && updates.branchId !== user.branchId) {
+            // Clear managerId from old branch
+            if (user.branchId) {
+                await ctx.db.patch(user.branchId, { managerId: undefined });
+            }
+            // Set managerId on new branch
+            await ctx.db.patch(updates.branchId, { managerId: id });
+        }
+
+        await ctx.db.patch(id, updates);
+        return true;
+    },
+});
+
 export const removeUser = mutation({
     args: { id: v.id("users") },
     handler: async (ctx, args) => {

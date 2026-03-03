@@ -56,26 +56,114 @@ export default function DashboardScreen() {
     const branchCouriers = useQuery(api.couriers.list, 
         (isBranchManager && user?.branchId) ? { branchId: user.branchId as any } : "skip"
     );
-            const createBranch = useMutation(api.branches.create);
-            const createManager = useMutation(api.users.createManager);
-            const createAgent = useMutation(api.users.createAgent);
-            const assignAgentToBranch = useMutation(api.users.updateBranch);
-            const removeUser = useMutation(api.users.removeUser);
-        
-                    const [showAddBranch, setShowAddBranch] = useState(false);
-                    const [showAddManager, setShowAddManager] = useState(false);
-                    const [showAddAgent, setShowAddAgent] = useState(false);
-                    const [showAssignAgent, setShowAssignAgent] = useState(false);
-                    const [showManagerDetailModal, setShowManagerDetailModal] = useState(false);
-                    const [showAgentDetailModal, setShowAgentDetailModal] = useState(false);
-                    const [selectedManager, setSelectedManager] = useState<any>(null);
-                    const [selectedAgent, setSelectedAgent] = useState<any>(null);
-                    
-                    const [branchName, setBranchName] = useState('');
-                    const [branchAddress, setBranchAddress] = useState('');
-                    const [isCreatingBranch, setIsCreatingBranch] = useState(false);
-                    const [isDeletingManager, setIsDeletingManager] = useState(false);
-                    const [isDeletingAgent, setIsDeletingAgent] = useState(false);
+    const createBranch = useMutation(api.branches.create);
+    const updateBranch = useMutation(api.branches.update);
+    const removeBranch = useMutation(api.branches.remove);
+    const createManager = useMutation(api.users.createManager);
+    const updateManager = useMutation(api.users.updateManager);
+    const createAgent = useMutation(api.users.createAgent);
+    const assignAgentToBranch = useMutation(api.users.updateBranch);
+    const removeUser = useMutation(api.users.removeUser);
+
+    const [showAddBranch, setShowAddBranch] = useState(false);
+    const [showAddManager, setShowAddManager] = useState(false);
+    const [showAddAgent, setShowAddAgent] = useState(false);
+    const [showAssignAgent, setShowAssignAgent] = useState(false);
+    const [showManagerDetailModal, setShowManagerDetailModal] = useState(false);
+    const [showAgentDetailModal, setShowAgentDetailModal] = useState(false);
+    const [showBranchDetailModal, setShowBranchDetailModal] = useState(false);
+    const [selectedManager, setSelectedManager] = useState<any>(null);
+    const [selectedAgent, setSelectedAgent] = useState<any>(null);
+    const [selectedBranch, setSelectedBranch] = useState<any>(null);
+    
+    const [branchName, setBranchName] = useState('');
+    const [branchAddress, setBranchAddress] = useState('');
+    const [isCreatingBranch, setIsCreatingBranch] = useState(false);
+    const [isUpdatingBranch, setIsUpdatingBranch] = useState(false);
+    const [isDeletingBranch, setIsDeletingBranch] = useState(false);
+    const [isDeletingManager, setIsDeletingManager] = useState(false);
+    const [isDeletingAgent, setIsDeletingAgent] = useState(false);
+
+    // Manager Edit State
+    const [isEditingManagerProfile, setIsEditingManagerProfile] = useState(false);
+    const [isUpdatingManagerProfile, setIsUpdatingManagerProfile] = useState(false);
+    const [editMgrName, setEditMgrName] = useState('');
+    const [editMgrEmail, setEditMgrEmail] = useState('');
+    const [editMgrPassword, setEditMgrPassword] = useState('');
+    const [editMgrBranchId, setEditMgrBranchId] = useState('');
+
+    const handleUpdateManagerProfile = async () => {
+        if (!selectedManager || !editMgrName || !editMgrEmail || !editMgrPassword || !editMgrBranchId) {
+            Alert.alert('Error', 'All fields are required.');
+            return;
+        }
+
+        setIsUpdatingManagerProfile(true);
+        try {
+            await updateManager({
+                id: selectedManager._id,
+                name: editMgrName,
+                email: editMgrEmail,
+                password: editMgrPassword,
+                branchId: editMgrBranchId as any,
+            });
+            setIsEditingManagerProfile(false);
+            setShowManagerDetailModal(false);
+            Alert.alert('Success', 'Manager profile updated.');
+        } catch (e: any) {
+            Alert.alert('Update Failed', e.message || 'Check connection.');
+        } finally {
+            setIsUpdatingManagerProfile(false);
+        }
+    };
+
+    const handleDeleteBranch = (id: string, name: string) => {
+        Alert.alert(
+            'Delete Branch',
+            `Are you sure you want to delete ${name}? All data associated with this hub will be affected.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        setIsDeletingBranch(true);
+                        try {
+                            await removeBranch({ id: id as any });
+                            setShowBranchDetailModal(false);
+                            Alert.alert('Success', 'Branch hub removed.');
+                        } catch (e) {
+                            Alert.alert('Error', 'Failed to remove branch.');
+                        } finally {
+                            setIsDeletingBranch(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleUpdateBranch = async () => {
+        if (!selectedBranch || !branchName || !branchAddress) {
+            Alert.alert('Error', 'Name and Address are required.');
+            return;
+        }
+
+        setIsUpdatingBranch(true);
+        try {
+            await updateBranch({
+                id: selectedBranch._id,
+                name: branchName,
+                address: branchAddress,
+            });
+            setShowBranchDetailModal(false);
+            Alert.alert('Success', 'Branch details updated.');
+        } catch (e: any) {
+            Alert.alert('Error', e.message || 'Failed to update branch');
+        } finally {
+            setIsUpdatingBranch(false);
+        }
+    };
                 
                     // Manager Form State
                     const [mgrName, setMgrName] = useState('');
@@ -649,10 +737,20 @@ export default function DashboardScreen() {
 
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.branchScroll}>
                             {branches?.map(b => (
-                                <View key={b._id} style={styles.branchChip}>
+                                <Pressable 
+                                    key={b._id} 
+                                    style={styles.branchChip}
+                                    onPress={() => {
+                                        setSelectedBranch(b);
+                                        setBranchName(b.name);
+                                        setBranchAddress(b.address);
+                                        setShowBranchDetailModal(true);
+                                    }}
+                                >
                                     <Ionicons name="business-outline" size={12} color={colors.primary} />
                                     <Text style={styles.branchChipText}>{b.name}</Text>
-                                </View>
+                                    <Ionicons name="pencil-outline" size={10} color={colors.textMuted} style={{ marginLeft: 4 }} />
+                                </Pressable>
                             ))}
                             {(!branches || branches.length === 0) && (
                                 <Text style={styles.noData}>No branches setup yet.</Text>
@@ -754,6 +852,11 @@ export default function DashboardScreen() {
                                 style={styles.managerCard}
                                 onPress={() => {
                                     setSelectedManager(mgr);
+                                    setEditMgrName(mgr.name);
+                                    setEditMgrEmail(mgr.email);
+                                    setEditMgrPassword(mgr.password);
+                                    setEditMgrBranchId(mgr.branchId);
+                                    setIsEditingManagerProfile(false);
                                     setShowManagerDetailModal(true);
                                 }}
                             >
@@ -981,53 +1084,120 @@ export default function DashboardScreen() {
                     <View style={styles.detailModalContent}>
                         <View style={styles.detailModalHeader}>
                             <Text style={styles.detailModalTitle}>Manager Profile</Text>
-                            <Pressable onPress={() => setShowManagerDetailModal(false)}>
-                                <Ionicons name="close" size={24} color={colors.text} />
-                            </Pressable>
+                            <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
+                                <Pressable onPress={() => setIsEditingManagerProfile(!isEditingManagerProfile)}>
+                                    <Ionicons 
+                                        name={isEditingManagerProfile ? "close-circle-outline" : "create-outline"} 
+                                        size={24} 
+                                        color={isEditingManagerProfile ? colors.error : colors.primary} 
+                                    />
+                                </Pressable>
+                                <Pressable onPress={() => setShowManagerDetailModal(false)}>
+                                    <Ionicons name="close" size={24} color={colors.text} />
+                                </Pressable>
+                            </View>
                         </View>
                         
                         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: spacing.xl }}>
                             <View style={styles.detailItem}>
                                 <Text style={styles.detailLabel}>Full Name</Text>
-                                <Text style={styles.detailValue}>{selectedManager?.name}</Text>
+                                {isEditingManagerProfile ? (
+                                    <TextInput 
+                                        style={styles.textInput}
+                                        value={editMgrName}
+                                        onChangeText={setEditMgrName}
+                                        placeholder="Name"
+                                    />
+                                ) : (
+                                    <Text style={styles.detailValue}>{selectedManager?.name}</Text>
+                                )}
                             </View>
                             
                             <View style={styles.detailItem}>
                                 <Text style={styles.detailLabel}>Email / Login ID</Text>
-                                <View style={styles.credentialBox}>
-                                    <Text style={styles.credentialText}>{selectedManager?.email}</Text>
-                                    <Ionicons name="mail-outline" size={14} color={colors.primary} />
-                                </View>
+                                {isEditingManagerProfile ? (
+                                    <TextInput 
+                                        style={styles.textInput}
+                                        value={editMgrEmail}
+                                        onChangeText={setEditMgrEmail}
+                                        keyboardType="email-address"
+                                        autoCapitalize="none"
+                                    />
+                                ) : (
+                                    <View style={styles.credentialBox}>
+                                        <Text style={styles.credentialText}>{selectedManager?.email}</Text>
+                                        <Ionicons name="mail-outline" size={14} color={colors.primary} />
+                                    </View>
+                                )}
                             </View>
                             
                             <View style={styles.detailItem}>
                                 <Text style={styles.detailLabel}>Password</Text>
-                                <View style={[styles.credentialBox, { backgroundColor: colors.warning + '10', borderColor: colors.warning + '30' }]}>
-                                    <Text style={[styles.credentialText, { color: colors.warning }]}>{selectedManager?.password}</Text>
-                                    <Ionicons name="lock-open-outline" size={16} color={colors.warning} />
-                                </View>
+                                {isEditingManagerProfile ? (
+                                    <TextInput 
+                                        style={styles.textInput}
+                                        value={editMgrPassword}
+                                        onChangeText={setEditMgrPassword}
+                                        secureTextEntry={false}
+                                    />
+                                ) : (
+                                    <View style={[styles.credentialBox, { backgroundColor: colors.warning + '10', borderColor: colors.warning + '30' }]}>
+                                        <Text style={[styles.credentialText, { color: colors.warning }]}>{selectedManager?.password}</Text>
+                                        <Ionicons name="lock-open-outline" size={16} color={colors.warning} />
+                                    </View>
+                                )}
                             </View>
                             
                             <View style={styles.detailItem}>
                                 <Text style={styles.detailLabel}>Assigned Branch Hub</Text>
-                                <View style={styles.branchDetailChip}>
-                                    <Ionicons name="business" size={14} color={colors.primary} />
-                                    <Text style={styles.branchDetailText}>
-                                        {branches?.find(b => b._id === selectedManager?.branchId)?.name || 'N/A'}
-                                    </Text>
-                                </View>
+                                {isEditingManagerProfile ? (
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                        {branches?.map(b => (
+                                            <Pressable
+                                                key={b._id}
+                                                style={[
+                                                    styles.branchChip,
+                                                    editMgrBranchId === b._id && { backgroundColor: colors.primary, borderColor: colors.primary }
+                                                ]}
+                                                onPress={() => setEditMgrBranchId(b._id)}
+                                            >
+                                                <Text style={[styles.branchChipText, editMgrBranchId === b._id && { color: '#fff' }]}>
+                                                    {b.name}
+                                                </Text>
+                                            </Pressable>
+                                        ))}
+                                    </ScrollView>
+                                ) : (
+                                    <View style={styles.branchDetailChip}>
+                                        <Ionicons name="business" size={14} color={colors.primary} />
+                                        <Text style={styles.branchDetailText}>
+                                            {branches?.find(b => b._id === selectedManager?.branchId)?.name || 'N/A'}
+                                        </Text>
+                                    </View>
+                                )}
                             </View>
 
-                            <View style={styles.detailActions}>
+                            {isEditingManagerProfile ? (
                                 <Pressable 
-                                    style={[styles.deleteButton, isDeletingManager && { opacity: 0.5 }]} 
-                                    onPress={() => handleDeleteManager(selectedManager._id, selectedManager.name)}
-                                    disabled={isDeletingManager}
+                                    style={[styles.primaryAction, { width: '100%' }, isUpdatingManagerProfile && { opacity: 0.5 }]} 
+                                    onPress={handleUpdateManagerProfile}
+                                    disabled={isUpdatingManagerProfile}
                                 >
-                                    <Ionicons name="trash-outline" size={18} color="#fff" />
-                                    <Text style={styles.deleteButtonText}>Delete Manager Account</Text>
+                                    <Ionicons name="save-outline" size={20} color="#fff" />
+                                    <Text style={styles.primaryActionText}>{isUpdatingManagerProfile ? "Updating..." : "Save Profile Changes"}</Text>
                                 </Pressable>
-                            </View>
+                            ) : (
+                                <View style={styles.detailActions}>
+                                    <Pressable 
+                                        style={[styles.deleteButton, isDeletingManager && { opacity: 0.5 }]} 
+                                        onPress={() => handleDeleteManager(selectedManager._id, selectedManager.name)}
+                                        disabled={isDeletingManager}
+                                    >
+                                        <Ionicons name="trash-outline" size={18} color="#fff" />
+                                        <Text style={styles.deleteButtonText}>Delete Manager Account</Text>
+                                    </Pressable>
+                                </View>
+                            )}
                         </ScrollView>
                     </View>
                 </View>
@@ -1089,6 +1259,70 @@ export default function DashboardScreen() {
                                 >
                                     <Ionicons name="trash-outline" size={18} color="#fff" />
                                     <Text style={styles.deleteButtonText}>Remove Agent from Fleet</Text>
+                                </Pressable>
+                            </View>
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Branch Profile / Edit Modal */}
+            <Modal
+                visible={showBranchDetailModal && !!selectedBranch}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowBranchDetailModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.detailModalContent}>
+                        <View style={styles.detailModalHeader}>
+                            <Text style={styles.detailModalTitle}>Branch Hub Details</Text>
+                            <Pressable onPress={() => setShowBranchDetailModal(false)}>
+                                <Ionicons name="close" size={24} color={colors.text} />
+                            </Pressable>
+                        </View>
+                        
+                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: spacing.xl }}>
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Branch Name</Text>
+                                <TextInput
+                                    style={styles.textInput}
+                                    value={branchName}
+                                    onChangeText={setBranchName}
+                                    placeholder="Hub Name"
+                                    placeholderTextColor={colors.textMuted}
+                                />
+                            </View>
+
+                            <View style={[styles.inputGroup, { marginTop: spacing.md }]}>
+                                <Text style={styles.inputLabel}>Branch Address</Text>
+                                <TextInput
+                                    style={[styles.textInput, { height: 80, textAlignVertical: 'top' }]}
+                                    value={branchAddress}
+                                    onChangeText={setBranchAddress}
+                                    placeholder="Full hub address"
+                                    multiline
+                                    placeholderTextColor={colors.textMuted}
+                                />
+                            </View>
+
+                            <View style={{ marginTop: spacing.xl, gap: spacing.md }}>
+                                <Pressable 
+                                    style={[styles.primaryAction, { width: '100%' }, isUpdatingBranch && { opacity: 0.5 }]} 
+                                    onPress={handleUpdateBranch}
+                                    disabled={isUpdatingBranch}
+                                >
+                                    <Ionicons name="save-outline" size={20} color="#fff" />
+                                    <Text style={styles.primaryActionText}>{isUpdatingBranch ? "Updating..." : "Save Changes"}</Text>
+                                </Pressable>
+
+                                <Pressable 
+                                    style={[styles.deleteButton, isDeletingBranch && { opacity: 0.5 }]} 
+                                    onPress={() => handleDeleteBranch(selectedBranch._id, selectedBranch.name)}
+                                    disabled={isDeletingBranch}
+                                >
+                                    <Ionicons name="trash-outline" size={18} color={colors.error} />
+                                    <Text style={styles.deleteButtonText}>Delete Branch Hub</Text>
                                 </Pressable>
                             </View>
                         </ScrollView>

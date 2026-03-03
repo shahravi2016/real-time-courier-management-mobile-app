@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Platform, Share } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, Platform, Share, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useQuery } from 'convex/react';
@@ -10,6 +10,7 @@ import { colors, spacing, fontSize, globalStyles } from '../../../src/styles/the
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 
 export default function InvoiceScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
@@ -17,6 +18,10 @@ export default function InvoiceScreen() {
     const courier = useQuery(api.couriers.getById, { id: id as Id<'couriers'> });
 
     if (!courier) return <LoadingState message="Loading invoice..." />;
+
+    const isExpress = courier.deliveryType === 'express';
+    const subtotal = (courier.weight || 0) * 5 + (courier.distance || 0) * 2 + 10;
+    const expressSurcharge = isExpress ? subtotal * 0.5 : 0;
 
     // Generate HTML for printing
     const generateHtml = () => {
@@ -36,14 +41,15 @@ export default function InvoiceScreen() {
                         .table th { background-color: #f8f8f8; }
                         .total { text-align: right; margin-top: 20px; font-size: 24px; font-weight: bold; }
                         .footer { margin-top: 50px; text-align: center; color: #888; font-size: 12px; }
+                        .surcharge { color: #e67e22; font-weight: bold; }
                     </style>
                 </head>
                 <body>
                     <div class="header">
                         <div class="title">INVOICE</div>
                         <div class="company">
-                            <strong>Courier Manager Inc.</strong><br>
-                            123 Logistics Way<br>
+                            <strong>Courier Express</strong><br>
+                            Logistics Way<br>
                             support@courier.com
                         </div>
                     </div>
@@ -81,13 +87,13 @@ export default function InvoiceScreen() {
                                 <td>Shipping Charges (Weight: ${courier.weight}kg)</td>
                                 <td>1</td>
                                 <td>₹5.00/kg</td>
-                                <td>₹${(courier.weight || 0) * 5}</td>
+                                <td>₹${((courier.weight || 0) * 5).toFixed(2)}</td>
                             </tr>
                              <tr>
                                 <td>Distance Charges (${courier.distance}km)</td>
                                 <td>1</td>
                                 <td>₹2.00/km</td>
-                                <td>₹${(courier.distance || 0) * 2}</td>
+                                <td>₹${((courier.distance || 0) * 2).toFixed(2)}</td>
                             </tr>
                             <tr>
                                 <td>Base Fee</td>
@@ -95,6 +101,14 @@ export default function InvoiceScreen() {
                                 <td>₹10.00</td>
                                 <td>₹10.00</td>
                             </tr>
+                            ${isExpress ? `
+                            <tr>
+                                <td class="surcharge">Express Delivery Surcharge (50%)</td>
+                                <td>1</td>
+                                <td>-</td>
+                                <td class="surcharge">₹${expressSurcharge.toFixed(2)}</td>
+                            </tr>
+                            ` : ''}
                         </tbody>
                     </table>
 
@@ -110,22 +124,36 @@ export default function InvoiceScreen() {
         `;
     };
 
-    const handlePrint = async () => {
+    const handleShare = async () => {
         try {
             const html = generateHtml();
-            if (Platform.OS === 'web') {
-                const printWindow = window.open('', '', 'height=600,width=800');
-                if (printWindow) {
-                    printWindow.document.write(html);
-                    printWindow.document.close();
-                    printWindow.print();
-                }
-            } else {
-                const { uri } = await Print.printToFileAsync({ html });
-                await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-            }
+            const { uri } = await Print.printToFileAsync({ html });
+            await Sharing.shareAsync(uri, { 
+                UTI: '.pdf', 
+                mimeType: 'application/pdf',
+                dialogTitle: `Invoice-${courier.trackingId}` 
+            });
         } catch (error) {
-            console.error('Print error:', error);
+            console.error('Share error:', error);
+            Alert.alert('Error', 'Failed to share invoice');
+        }
+    };
+
+    const handleDownload = async () => {
+        try {
+            const html = generateHtml();
+            const { uri } = await Print.printToFileAsync({ html });
+            
+            // On mobile, the safest way to "download" is to use the share sheet 
+            // with save to files capability.
+            await Sharing.shareAsync(uri, {
+                UTI: '.pdf',
+                mimeType: 'application/pdf',
+                dialogTitle: `Download-Invoice-${courier.trackingId}`
+            });
+        } catch (error) {
+            console.error('Download error:', error);
+            Alert.alert('Error', 'Failed to prepare download');
         }
     };
 
@@ -138,15 +166,28 @@ export default function InvoiceScreen() {
                     <Ionicons name="arrow-back" size={24} color={colors.text} />
                     <Text style={[globalStyles.subtitle, { marginLeft: spacing.sm }]}>Invoice</Text>
                 </Pressable>
-                <Pressable onPress={handlePrint} style={styles.printButton}>
-                    <Ionicons name="print-outline" size={24} color={colors.text} />
-                </Pressable>
+                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                    <Pressable onPress={handleDownload} style={styles.actionButton}>
+                        <Ionicons name="download-outline" size={22} color={colors.text} />
+                    </Pressable>
+                    <Pressable onPress={handleShare} style={styles.actionButton}>
+                        <Ionicons name="share-outline" size={22} color={colors.text} />
+                    </Pressable>
+                </View>
             </View>
 
             <ScrollView style={styles.container}>
                 <View style={styles.paper}>
                     <View style={globalStyles.spaceBetween}>
-                        <Text style={styles.logoText}>INVOICE</Text>
+                        <View>
+                            <Text style={styles.logoText}>INVOICE</Text>
+                            {isExpress && (
+                                <View style={styles.expressBadge}>
+                                    <Ionicons name="flash" size={10} color="#fff" />
+                                    <Text style={styles.expressBadgeText}>EXPRESS SHIPMENT</Text>
+                                </View>
+                            )}
+                        </View>
                         <Text style={styles.mutedText}>INV-{courier.trackingId}</Text>
                     </View>
 
@@ -194,15 +235,23 @@ export default function InvoiceScreen() {
                         </View>
                         <View style={styles.lineItem}>
                             <Text style={styles.itemDesc}>Weight Charge ({courier.weight || 0}kg × ₹5)</Text>
-                            <Text style={styles.itemPrice}>₹${((courier.weight || 0) * 5).toFixed(2)}</Text>
+                            <Text style={styles.itemPrice}>₹{((courier.weight || 0) * 5).toFixed(2)}</Text>
                         </View>
                         <View style={styles.lineItem}>
                             <Text style={styles.itemDesc}>Distance Charge ({courier.distance || 0}km × ₹2)</Text>
-                            <Text style={styles.itemPrice}>₹${((courier.distance || 0) * 2).toFixed(2)}</Text>
+                            <Text style={styles.itemPrice}>₹{((courier.distance || 0) * 2).toFixed(2)}</Text>
                         </View>
+                        
+                        {isExpress && (
+                            <View style={[styles.lineItem, { borderBottomColor: colors.warning + '30' }]}>
+                                <Text style={[styles.itemDesc, { color: colors.warning, fontWeight: 'bold' }]}>Express Surcharge (50%)</Text>
+                                <Text style={[styles.itemPrice, { color: colors.warning }]}>₹{expressSurcharge.toFixed(2)}</Text>
+                            </View>
+                        )}
+
                         <View style={styles.totalRow}>
                             <Text style={styles.totalLabel}>Total</Text>
-                            <Text style={styles.totalValue}>₹${(courier.price || 0).toFixed(2)}</Text>
+                            <Text style={styles.totalValue}>₹{(courier.price || 0).toFixed(2)}</Text>
                         </View>
                     </View>
                 </View>
@@ -223,10 +272,12 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.md,
         alignItems: 'center',
     },
-    printButton: {
+    actionButton: {
         padding: spacing.sm,
         backgroundColor: colors.surfaceElevated,
         borderRadius: 8,
+        borderWidth: 1,
+        borderColor: colors.border,
     },
     paper: {
         backgroundColor: 'white',
@@ -311,5 +362,20 @@ const styles = StyleSheet.create({
         fontSize: fontSize.xs,
         fontWeight: '700',
         letterSpacing: 0.5,
+    },
+    expressBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.warning,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+        marginTop: 4,
+        gap: 4,
+    },
+    expressBadgeText: {
+        color: '#fff',
+        fontSize: 8,
+        fontWeight: 'bold',
     },
 });

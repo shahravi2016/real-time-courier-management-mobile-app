@@ -42,7 +42,15 @@ export default function CourierListScreen() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedFilter, setSelectedFilter] = useState<string>('all');
 
-    const { user } = useAuth();
+    const { user, isLoading: authLoading } = useAuth();
+
+    // Force redirect to login if not authenticated
+    React.useEffect(() => {
+        if (!authLoading && !user) {
+            router.replace('/auth/login');
+        }
+    }, [user, authLoading]);
+
     const isAdmin = user?.role === 'admin';
     const isBranchManager = user?.role === 'branch_manager';
 

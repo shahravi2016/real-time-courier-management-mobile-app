@@ -550,15 +550,22 @@ export const completeDelivery = mutation({
 
         await ctx.db.patch(args.id, {
             currentStatus: "delivered",
+            paymentStatus: "paid",
             podId,
             updatedAt: Date.now(),
         });
+
+        if (courier.invoiceId) {
+            await ctx.db.patch(courier.invoiceId, {
+                status: "paid",
+            });
+        }
 
         await ctx.db.insert("logs", {
             courierId: args.id,
             trackingId: courier.trackingId,
             action: "status_changed",
-            description: `Delivery Completed (POD Captured). Signed by: ${args.signeeName}`,
+            description: `Delivery Completed (POD Captured). Signed by: ${args.signeeName}. Payment marked as PAID.`,
             timestamp: Date.now(),
         });
     },
@@ -612,10 +619,24 @@ export const updateStatus = mutation({
 
         const oldStatus = courier.currentStatus;
 
-        await ctx.db.patch(args.id, {
+        const updates: any = {
             currentStatus: args.status,
             updatedAt: Date.now(),
-        });
+        };
+
+        // If status is changed to delivered, mark payment as paid
+        if (args.status === "delivered") {
+            updates.paymentStatus = "paid";
+        }
+
+        await ctx.db.patch(args.id, updates);
+
+        // Also update invoice status if it exists
+        if (args.status === "delivered" && courier.invoiceId) {
+            await ctx.db.patch(courier.invoiceId, {
+                status: "paid",
+            });
+        }
 
         const formatStatus = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
 
@@ -623,7 +644,9 @@ export const updateStatus = mutation({
             courierId: args.id,
             trackingId: courier.trackingId,
             action: "status_changed",
-            description: `Status changed: ${formatStatus(oldStatus)} → ${formatStatus(args.status)}`,
+            description: args.status === "delivered" 
+                ? `Status changed: ${formatStatus(oldStatus)} → ${formatStatus(args.status)}. Payment marked as PAID.`
+                : `Status changed: ${formatStatus(oldStatus)} → ${formatStatus(args.status)}`,
             timestamp: Date.now(),
         });
 
