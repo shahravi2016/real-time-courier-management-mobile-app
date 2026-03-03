@@ -12,27 +12,34 @@ A premium, high-performance courier management ecosystem built with **React Nati
 ## 🚀 Key Capabilities
 
 ### 🛡️ Role-Based Access Control (RBAC)
-- **Admin Console**: Full fleet oversight, branch management, revenue analytics, and agent assignment.
-- **Agent Console**: Focused job queue, monthly delivery targets, earnings tracking, and status management.
-- **Customer Console**: Personal tracking hub for incoming/outgoing parcels with real-time status updates.
+- **Admin Console**: Full fleet oversight, branch management (CRUD), real-time revenue analytics, and agent fleet assignment.
+- **Branch Manager**: localized hub oversight, managing parcels specific to their branch, and tracking local performance.
+- **Agent Console**: Focused job queue, monthly delivery targets, earnings tracking (10% commission model), and status management.
+- **Customer Console**: Personal tracking hub for incoming/outgoing parcels with real-time status updates and OTP access.
+
+### 🏢 Logistics & Hub Management
+- **Branch Hubs**: Admin can create, edit, and delete branch hubs. Each hub tracks its own parcel flow and revenue.
+- **Manager Profiles**: Detailed management of branch managers, including profile editing and branch reassignment.
+- **Agent Fleet**: Comprehensive fleet management with the ability to assign/re-assign agents to specific hubs.
 
 ### 🧾 Enterprise Billing & Invoicing
 - **Dynamic Pricing**: Automatic price calculation based on weight (kg) and distance (km).
 - **Pro Invoice Generation**: Automated PDF generation with professional branding and sharing capabilities.
-- **Payment Lifecycle**: Support for Paid/Unpaid/Pending states with multiple payment methods (Cash, Card, Prepaid).
+- **Automated Lifecycle**: Payment status automatically transitions to **"PAID"** upon successful delivery completion.
 
 ### ✍️ Advanced Proof of Delivery (POD)
+- **OTP Verification**: Secure 4-digit OTP required for delivery completion, ensuring packages reach the correct recipient.
 - **Signature Capture**: High-fidelity digital signature pad for recipients.
 - **Photo Verification**: Integrated camera support to document package condition on arrival.
-- **Audit Logs**: Immutable activity trails for every courier update.
+- **Audit Logs**: Immutable activity trails for every courier update, providing a complete chain of custody.
 
 ---
 
 ## 🎨 Design System: "True Black"
 The app features a professional **True Black** aesthetic designed for high-contrast visibility and reduced eye strain:
 - **Background**: Pure `#000000` for OLED efficiency.
-- **Contrast**: Optimized `#FFFFFF` primary text and `#9CA3AF` secondary cues.
-- **Accents**: Vibrant primary branding for clear interactive calls to action.
+- **Branding**: Custom adaptive icons and splash screens for a native enterprise feel.
+- **Interactive UI**: Fluid transitions, role-specific dashboards, and interactive analytics charts.
 
 ---
 
@@ -42,8 +49,9 @@ The app features a professional **True Black** aesthetic designed for high-contr
 |-------|------------|
 | **Frontend** | React Native + Expo (SDK 51+) |
 | **Backend** | Convex (Full-stack Realtime Database) |
+| **Styling** | Centralized Theme System (True Black) |
+| **Charts** | Custom Responsive Analytics Components |
 | **State** | React Context + Convex Typed Queries |
-| **Security** | Role-based authentication & Ownership checks |
 
 ---
 
@@ -75,13 +83,14 @@ npx expo start --tunnel
 │   ├── couriers/           # Courier Management Hub
 │   │   ├── [id]/invoice.tsx# Dynamic Invoice Generation
 │   │   └── [id].tsx        # Advanced Details & POD Flow
-│   └── index.tsx           # Multi-Tenant Dashboard
+│   └── index.tsx           # Multi-Tenant Dashboard (Admin/Manager/Agent/Customer)
 ├── convex/                 # Enterprise Backend Implementation
 │   ├── schema.ts           # Strictly Typed Data Model
 │   ├── couriers.ts         # Business Logic, Stats & Security
-│   └── branches.ts         # Hub & Logistics Management
+│   ├── branches.ts         # Hub & Logistics Management
+│   └── users.ts            # RBAC & Profile Management
 └── src/
-    ├── components/         # Reusable Premium UI Blocks
+    ├── components/         # Reusable Premium UI Blocks (Charts, Stats, POD)
     └── styles/theme.ts     # Centralized "True Black" Tokens
 ```
 
@@ -92,10 +101,10 @@ npx expo start --tunnel
 ### Courier Entity
 ```typescript
 {
-  trackingId: string,       // CRR-XXXX-YYYY
-  currentStatus: "pending" | "picked_up" | "in_transit" | "out_for_delivery" | "delivered",
+  trackingId: string,       // TRK-XXXXXX
+  currentStatus: "booked" | "picked_up" | "in_transit" | "out_for_delivery" | "delivered" | "cancelled",
   billing: { weight, distance, price, paymentStatus, method },
-  logistics: { assignedTo, branchId, invoiceId, podId },
+  logistics: { assignedTo, branchId, invoiceId, podId, otpCode },
   participants: { senderName, receiverName, receiverPhone, addresses }
 }
 ```
