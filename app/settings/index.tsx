@@ -6,7 +6,7 @@ import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
 import { FormInput } from '../../src/components';
-import { colors, spacing, globalStyles } from '../../src/styles/theme';
+import { colors, spacing, globalStyles, fontSize } from '../../src/styles/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/components/auth-context';
 
@@ -19,12 +19,17 @@ export default function SettingsScreen() {
         return null;
     }
 
+    const isAdmin = user.role === 'admin';
+    const isRestricted = user.role === 'agent' || user.role === 'branch_manager';
+
     const updateProfile = useMutation(api.users.updateProfile);
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
     const [form, setForm] = useState({
         name: user.name || '',
         phone: user.phone || '',
+        password: '',
     });
     const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -33,6 +38,7 @@ export default function SettingsScreen() {
         setForm({
             name: user.name || '',
             phone: user.phone || '',
+            password: '',
         });
     }, [user.name, user.phone]);
 
@@ -49,6 +55,9 @@ export default function SettingsScreen() {
         if (form.phone && form.phone.replace(/\D/g, '').length !== 10) {
             newErrors.phone = 'Phone number must be exactly 10 digits';
         }
+        if (isAdmin && form.password && form.password.length < 6) {
+            newErrors.password = 'New password must be at least 6 characters';
+        }
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
@@ -62,6 +71,7 @@ export default function SettingsScreen() {
                 id: user._id as Id<'users'>,
                 name: form.name.trim(),
                 phone: form.phone.trim() || undefined,
+                password: (isAdmin && form.password) ? form.password : undefined,
             });
             Alert.alert('Success', 'Profile updated successfully', [
                 { text: 'OK', onPress: () => router.back() },
@@ -99,18 +109,23 @@ export default function SettingsScreen() {
                             </View>
                             <View style={styles.roleBadge}>
                                 <Text style={styles.roleBadgeText}>
-                                    {user.role.toUpperCase()}
+                                    {user.role.replace('_', ' ').toUpperCase()}
                                 </Text>
                             </View>
                         </View>
 
                         <Text style={styles.sectionTitle}>Account Details</Text>
 
-                        <FormInput
-                            label="Email Address (Read-only)"
-                            value={user.email}
-                            onChangeText={() => { }}
-                        />
+                        <View style={styles.inputContainer}>
+                            <Text style={styles.inputLabel}>Email Address</Text>
+                            <View style={[styles.readOnlyInput, isRestricted && styles.lockedInput]}>
+                                <Text style={styles.readOnlyText}>{user.email}</Text>
+                                {isRestricted && <Ionicons name="lock-closed" size={16} color={colors.textMuted} />}
+                            </View>
+                            {isRestricted && (
+                                <Text style={styles.helperText}>Contact Admin to change email address.</Text>
+                            )}
+                        </View>
 
                         <FormInput
                             label="Full Name"
@@ -128,6 +143,34 @@ export default function SettingsScreen() {
                             keyboardType="phone-pad"
                             error={errors.phone}
                         />
+
+                        {isAdmin ? (
+                            <FormInput
+                                label="Update Password (Optional)"
+                                value={form.password}
+                                onChangeText={(val) => updateField('password', val)}
+                                placeholder="Enter new password"
+                                secureTextEntry
+                                error={errors.password}
+                            />
+                        ) : (
+                            <View style={styles.inputContainer}>
+                                <Text style={styles.inputLabel}>Your Password</Text>
+                                <View style={[styles.readOnlyInput, styles.lockedInput]}>
+                                    <Text style={styles.readOnlyText}>
+                                        {showPassword ? (user.password || 'N/A') : '••••••••••••'}
+                                    </Text>
+                                    <Pressable onPress={() => setShowPassword(!showPassword)}>
+                                        <Ionicons 
+                                            name={showPassword ? "eye-off-outline" : "eye-outline"} 
+                                            size={20} 
+                                            color={colors.primary} 
+                                        />
+                                    </Pressable>
+                                </View>
+                                <Text style={styles.helperText}>Only Admin can reset this password.</Text>
+                            </View>
+                        )}
 
                         <Pressable
                             style={({ pressed }) => [
@@ -215,6 +258,38 @@ const styles = StyleSheet.create({
         color: colors.text,
         marginBottom: spacing.lg,
         marginTop: spacing.md,
+    },
+    inputContainer: {
+        marginBottom: spacing.lg,
+    },
+    inputLabel: {
+        fontSize: 14,
+        color: colors.textSecondary,
+        marginBottom: 8,
+        fontWeight: '500',
+    },
+    readOnlyInput: {
+        backgroundColor: colors.surfaceElevated,
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderRadius: 8,
+        padding: spacing.md,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    lockedInput: {
+        opacity: 0.9,
+    },
+    readOnlyText: {
+        color: colors.textMuted,
+        fontSize: 16,
+    },
+    helperText: {
+        fontSize: 12,
+        color: colors.primary,
+        marginTop: 6,
+        fontStyle: 'italic',
     },
     saveButton: {
         backgroundColor: colors.primary,

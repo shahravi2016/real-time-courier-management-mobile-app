@@ -62,6 +62,7 @@ export default function DashboardScreen() {
     const createManager = useMutation(api.users.createManager);
     const updateManager = useMutation(api.users.updateManager);
     const createAgent = useMutation(api.users.createAgent);
+    const updateAgent = useMutation(api.users.updateAgent);
     const assignAgentToBranch = useMutation(api.users.updateBranch);
     const removeUser = useMutation(api.users.removeUser);
 
@@ -91,6 +92,14 @@ export default function DashboardScreen() {
     const [editMgrEmail, setEditMgrEmail] = useState('');
     const [editMgrPassword, setEditMgrPassword] = useState('');
     const [editMgrBranchId, setEditMgrBranchId] = useState('');
+
+    // Agent Edit State
+    const [isEditingAgentProfile, setIsEditingAgentProfile] = useState(false);
+    const [isUpdatingAgentProfile, setIsUpdatingAgentProfile] = useState(false);
+    const [editAgentName, setEditAgentName] = useState('');
+    const [editAgentEmail, setEditAgentEmail] = useState('');
+    const [editAgentPassword, setEditAgentPassword] = useState('');
+    const [editAgentBranchId, setEditAgentBranchId] = useState('');
 
     const handleUpdateManagerProfile = async () => {
         if (!selectedManager || !editMgrName || !editMgrEmail || !editMgrPassword || !editMgrBranchId) {
@@ -1214,53 +1223,131 @@ export default function DashboardScreen() {
                     <View style={styles.detailModalContent}>
                         <View style={styles.detailModalHeader}>
                             <Text style={styles.detailModalTitle}>Agent Profile</Text>
-                            <Pressable onPress={() => setShowAgentDetailModal(false)}>
-                                <Ionicons name="close" size={24} color={colors.text} />
-                            </Pressable>
+                            <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
+                                <Pressable onPress={() => setIsEditingAgentProfile(!isEditingAgentProfile)}>
+                                    <Ionicons 
+                                        name={isEditingAgentProfile ? "close-circle-outline" : "create-outline"} 
+                                        size={24} 
+                                        color={isEditingAgentProfile ? colors.error : colors.primary} 
+                                    />
+                                </Pressable>
+                                <Pressable onPress={() => setShowAgentDetailModal(false)}>
+                                    <Ionicons name="close" size={24} color={colors.text} />
+                                </Pressable>
+                            </View>
                         </View>
                         
                         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: spacing.xl }}>
                             <View style={styles.detailItem}>
                                 <Text style={styles.detailLabel}>Full Name</Text>
-                                <Text style={styles.detailValue}>{selectedAgent?.name}</Text>
+                                {isEditingAgentProfile ? (
+                                    <TextInput 
+                                        style={styles.textInput}
+                                        value={editAgentName}
+                                        onChangeText={setEditAgentName}
+                                        placeholder="Name"
+                                    />
+                                ) : (
+                                    <Text style={styles.detailValue}>{selectedAgent?.name}</Text>
+                                )}
                             </View>
                             
                             <View style={styles.detailItem}>
                                 <Text style={styles.detailLabel}>Email / Login ID</Text>
-                                <View style={styles.credentialBox}>
-                                    <Text style={styles.credentialText}>{selectedAgent?.email}</Text>
-                                    <Ionicons name="mail-outline" size={14} color={colors.primary} />
-                                </View>
+                                {isEditingAgentProfile ? (
+                                    <TextInput 
+                                        style={styles.textInput}
+                                        value={editAgentEmail}
+                                        onChangeText={setEditAgentEmail}
+                                        keyboardType="email-address"
+                                        autoCapitalize="none"
+                                    />
+                                ) : (
+                                    <View style={styles.credentialBox}>
+                                        <Text style={styles.credentialText}>{selectedAgent?.email}</Text>
+                                        <Ionicons name="mail-outline" size={14} color={colors.primary} />
+                                    </View>
+                                )}
                             </View>
                             
                             <View style={styles.detailItem}>
                                 <Text style={styles.detailLabel}>Password</Text>
-                                <View style={[styles.credentialBox, { backgroundColor: colors.warning + '10', borderColor: colors.warning + '30' }]}>
-                                    <Text style={[styles.credentialText, { color: colors.warning }]}>{selectedAgent?.password}</Text>
-                                    <Ionicons name="lock-open-outline" size={16} color={colors.warning} />
-                                </View>
+                                {isEditingAgentProfile ? (
+                                    <TextInput 
+                                        style={styles.textInput}
+                                        value={editAgentPassword}
+                                        onChangeText={setEditAgentPassword}
+                                        secureTextEntry={false}
+                                    />
+                                ) : (
+                                    <View style={[styles.credentialBox, { backgroundColor: colors.warning + '10', borderColor: colors.warning + '30' }]}>
+                                        <Text style={[styles.credentialText, { color: colors.warning }]}>{selectedAgent?.password}</Text>
+                                        <Ionicons name="lock-open-outline" size={16} color={colors.warning} />
+                                    </View>
+                                )}
                             </View>
                             
                             <View style={styles.detailItem}>
                                 <Text style={styles.detailLabel}>Current Assigned Hub</Text>
-                                <View style={styles.branchDetailChip}>
-                                    <Ionicons name="business" size={14} color={colors.primary} />
-                                    <Text style={styles.branchDetailText}>
-                                        {branches?.find(b => b._id === selectedAgent?.branchId)?.name || 'Unassigned'}
-                                    </Text>
-                                </View>
+                                {isEditingAgentProfile ? (
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                        <Pressable
+                                            style={[
+                                                styles.branchChip,
+                                                editAgentBranchId === '' && { backgroundColor: colors.primary, borderColor: colors.primary }
+                                            ]}
+                                            onPress={() => setEditAgentBranchId('')}
+                                        >
+                                            <Text style={[styles.branchChipText, editAgentBranchId === '' && { color: '#fff' }]}>
+                                                Unassigned
+                                            </Text>
+                                        </Pressable>
+                                        {branches?.map(b => (
+                                            <Pressable
+                                                key={b._id}
+                                                style={[
+                                                    styles.branchChip,
+                                                    editAgentBranchId === b._id && { backgroundColor: colors.primary, borderColor: colors.primary }
+                                                ]}
+                                                onPress={() => setEditAgentBranchId(b._id)}
+                                            >
+                                                <Text style={[styles.branchChipText, editAgentBranchId === b._id && { color: '#fff' }]}>
+                                                    {b.name}
+                                                </Text>
+                                            </Pressable>
+                                        ))}
+                                    </ScrollView>
+                                ) : (
+                                    <View style={styles.branchDetailChip}>
+                                        <Ionicons name="business" size={14} color={colors.primary} />
+                                        <Text style={styles.branchDetailText}>
+                                            {branches?.find(b => b._id === selectedAgent?.branchId)?.name || 'Unassigned'}
+                                        </Text>
+                                    </View>
+                                )}
                             </View>
 
-                            <View style={styles.detailActions}>
+                            {isEditingAgentProfile ? (
                                 <Pressable 
-                                    style={[styles.deleteButton, isDeletingAgent && { opacity: 0.5 }]} 
-                                    onPress={() => handleDeleteAgent(selectedAgent._id, selectedAgent.name)}
-                                    disabled={isDeletingAgent}
+                                    style={[styles.primaryAction, { width: '100%' }, isUpdatingAgentProfile && { opacity: 0.5 }]} 
+                                    onPress={handleUpdateAgentProfile}
+                                    disabled={isUpdatingAgentProfile}
                                 >
-                                    <Ionicons name="trash-outline" size={18} color="#fff" />
-                                    <Text style={styles.deleteButtonText}>Remove Agent from Fleet</Text>
+                                    <Ionicons name="save-outline" size={20} color="#fff" />
+                                    <Text style={styles.primaryActionText}>{isUpdatingAgentProfile ? "Updating..." : "Save Agent Details"}</Text>
                                 </Pressable>
-                            </View>
+                            ) : (
+                                <View style={styles.detailActions}>
+                                    <Pressable 
+                                        style={[styles.deleteButton, isDeletingAgent && { opacity: 0.5 }]} 
+                                        onPress={() => handleDeleteAgent(selectedAgent._id, selectedAgent.name)}
+                                        disabled={isDeletingAgent}
+                                    >
+                                        <Ionicons name="trash-outline" size={18} color="#fff" />
+                                        <Text style={styles.deleteButtonText}>Remove Agent from Fleet</Text>
+                                    </Pressable>
+                                </View>
+                            )}
                         </ScrollView>
                     </View>
                 </View>

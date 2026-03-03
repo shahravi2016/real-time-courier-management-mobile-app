@@ -102,20 +102,24 @@ export const updateProfile = mutation({
         id: v.id("users"),
         name: v.string(),
         phone: v.optional(v.string()),
+        password: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        // Enforce that only the user themselves can update their profile
-        // Since we're not using real auth context in this simplified version,
-        // we'll just allow the patch for now. In a real app, verify ctx.auth.
         const user = await ctx.db.get(args.id);
         if (!user) {
             throw new Error("User not found");
         }
 
-        await ctx.db.patch(args.id, {
+        const updates: any = {
             name: args.name,
             phone: args.phone,
-        });
+        };
+
+        if (args.password) {
+            updates.password = args.password;
+        }
+
+        await ctx.db.patch(args.id, updates);
 
         return true;
     },
@@ -164,6 +168,32 @@ export const updateManager = mutation({
             }
             // Set managerId on new branch
             await ctx.db.patch(updates.branchId, { managerId: id });
+        }
+
+        await ctx.db.patch(id, updates);
+        return true;
+    },
+});
+
+export const updateAgent = mutation({
+    args: {
+        id: v.id("users"),
+        name: v.optional(v.string()),
+        email: v.optional(v.string()),
+        password: v.optional(v.string()),
+        branchId: v.optional(v.id("branches")),
+    },
+    handler: async (ctx, args) => {
+        const { id, ...updates } = args;
+        const user = await ctx.db.get(id);
+        if (!user) throw new Error("User not found");
+
+        if (updates.email && updates.email !== user.email) {
+            const existing = await ctx.db
+                .query("users")
+                .withIndex("by_email", (q) => q.eq("email", updates.email!))
+                .first();
+            if (existing) throw new Error("Email already registered");
         }
 
         await ctx.db.patch(id, updates);

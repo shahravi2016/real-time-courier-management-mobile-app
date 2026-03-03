@@ -8,6 +8,7 @@ interface User {
     role: 'admin' | 'branch_manager' | 'agent' | 'customer';
     branchId?: string;
     phone?: string;
+    password?: string;
 }
 
 interface AuthContextType {
