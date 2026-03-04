@@ -44,6 +44,12 @@ export const getById = query({
         const courier = await ctx.db.get(args.id);
         if (!courier) return null;
 
+        // Fail-safe: If delivered, it must be paid. If cancelled, it might be unpaid/void.
+        let paymentStatus = courier.paymentStatus;
+        if (courier.currentStatus === "delivered") {
+            paymentStatus = "paid";
+        }
+
         let pod = null;
         if (courier.podId) {
             pod = await ctx.db.get(courier.podId);
@@ -52,9 +58,13 @@ export const getById = query({
         let invoice = null;
         if (courier.invoiceId) {
             invoice = await ctx.db.get(courier.invoiceId);
+            // Sync invoice status too in-memory for the UI
+            if (courier.currentStatus === "delivered" && invoice && invoice.status !== "paid") {
+                invoice.status = "paid";
+            }
         }
 
-        return { ...courier, pod, invoice };
+        return { ...courier, paymentStatus, pod, invoice };
     },
 });
 
@@ -431,6 +441,19 @@ export const create = mutation({
     },
 });
 
+// Internal helper to sync payment and invoice status
+async function syncStatus(ctx: any, courierId: Id<"couriers">, status: string) {
+    const courier = await ctx.db.get(courierId);
+    if (!courier) return;
+
+    if (status === "delivered") {
+        await ctx.db.patch(courierId, { paymentStatus: "paid" });
+        if (courier.invoiceId) {
+            await ctx.db.patch(courier.invoiceId, { status: "paid" });
+        }
+    }
+}
+
 // Update courier details
 export const update = mutation({
     args: {
@@ -466,6 +489,11 @@ export const update = mutation({
             ...filteredUpdates,
             updatedAt: Date.now(),
         });
+
+        // Re-sync if status is delivered
+        if (courier.currentStatus === "delivered") {
+            await syncStatus(ctx, id, "delivered");
+        }
 
         await ctx.db.insert("logs", {
             courierId: id,
@@ -531,11 +559,6 @@ export const completeDelivery = mutation({
             }
         }
 
-        // Auth check: If it's a mutation call, we usually check auth via ctx.auth 
-        // but since we are using explicit userID in some cases or simple roles:
-        // For POD, we assume the frontend sends the user identity.
-        // We'll trust the assignment check for now or add a userId to args for strict check.
-
         const podId = await ctx.db.insert("proofOfDelivery", {
             courierId: args.id,
             signatureId: args.signatureId,
@@ -586,7 +609,7 @@ export const generateInvoice = mutation({
             amount: courier.price || 0,
             customerName: courier.senderName, // Billing to sender usually
             customerAddress: courier.pickupAddress, // Billing address
-            status: courier.paymentStatus === "paid" ? "paid" : "unpaid",
+            status: (courier.paymentStatus === "paid" || courier.currentStatus === "delivered") ? "paid" : "unpaid",
             generatedAt: Date.now(),
         });
 
@@ -631,12 +654,8 @@ export const updateStatus = mutation({
 
         await ctx.db.patch(args.id, updates);
 
-        // Also update invoice status if it exists
-        if (args.status === "delivered" && courier.invoiceId) {
-            await ctx.db.patch(courier.invoiceId, {
-                status: "paid",
-            });
-        }
+        // Sync status logic
+        await syncStatus(ctx, args.id, args.status);
 
         const formatStatus = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
 
@@ -649,9 +668,6 @@ export const updateStatus = mutation({
                 : `Status changed: ${formatStatus(oldStatus)} → ${formatStatus(args.status)}`,
             timestamp: Date.now(),
         });
-
-        // Mock: Trigger notifications (SMS/Email)
-        // console.log(`Notifying receiver: Your package ${courier.trackingId} is now ${args.status}`);
     },
 });
 
@@ -677,6 +693,34 @@ export const cancelCourier = mutation({
             trackingId: courier.trackingId,
             action: "status_changed",
             description: "Booking cancelled by user",
+            timestamp: Date.now(),
+        });
+    },
+});
+
+// Mark courier as paid manually
+export const markAsPaid = mutation({
+    args: { id: v.id("couriers") },
+    handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Courier not found");
+
+        await ctx.db.patch(args.id, {
+            paymentStatus: "paid",
+            updatedAt: Date.now(),
+        });
+
+        if (courier.invoiceId) {
+            await ctx.db.patch(courier.invoiceId, {
+                status: "paid",
+            });
+        }
+
+        await ctx.db.insert("logs", {
+            courierId: args.id,
+            trackingId: courier.trackingId,
+            action: "status_changed",
+            description: "Payment marked as PAID manually by admin",
             timestamp: Date.now(),
         });
     },

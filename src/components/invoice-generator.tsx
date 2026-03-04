@@ -12,6 +12,7 @@ export const generateAndShareInvoice = async (courier: any, invoiceNumber: strin
     const isExpress = courier.deliveryType === 'express';
     const subtotal = (courier.weight || 0) * 5 + (courier.distance || 0) * 2 + 10;
     const expressSurcharge = isExpress ? subtotal * 0.5 : 0;
+    const paymentStatus = courier.paymentStatus === 'paid' ? 'PAID' : 'PENDING';
 
     const html = `
     <html>
@@ -30,14 +31,16 @@ export const generateAndShareInvoice = async (courier: any, invoiceNumber: strin
             .total { text-align: right; font-size: 20px; font-weight: bold; }
             .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #666; }
             .surcharge { color: #e67e22; font-weight: bold; }
+            .status-box { font-weight: bold; padding: 5px; border: 1px solid #333; display: inline-block; margin-top: 10px; }
         </style>
       </head>
       <body>
         <div class="header">
-            <div class="logo">COURIER EXPRESS</div>
+            <div class="logo">COURIER MANAGER</div>
             <div class="invoice-title">INVOICE</div>
             <div>Invoice #: ${invoiceNumber}</div>
             <div>Date: ${new Date(courier.createdAt).toLocaleDateString()}</div>
+            <div class="status-box">STATUS: ${paymentStatus}</div>
         </div>
 
         <div class="details">
@@ -94,7 +97,7 @@ export const generateAndShareInvoice = async (courier: any, invoiceNumber: strin
 
         <div class="footer">
             <p>Thank you for your business!</p>
-            <p>Tracking ID: ${courier.trackingId} | Status: ${courier.currentStatus}</p>
+            <p>Tracking ID: ${courier.trackingId} | Payment Status: ${paymentStatus}</p>
         </div>
       </body>
     </html>

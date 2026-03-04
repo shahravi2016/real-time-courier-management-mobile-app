@@ -1,13 +1,14 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, Platform, Share, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import { useQuery } from 'convex/react';
+import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { Id } from '../../../convex/_generated/dataModel';
 import { LoadingState, ErrorState } from '../../../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../../../src/styles/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../../../src/components/auth-context';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
@@ -15,7 +16,11 @@ import * as FileSystem from 'expo-file-system';
 export default function InvoiceScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
     const courier = useQuery(api.couriers.getById, { id: id as Id<'couriers'> });
+    const markAsPaid = useMutation(api.couriers.markAsPaid);
+    const [isUpdating, setIsUpdating] = useState(false);
 
     if (!courier) return <LoadingState message="Loading invoice..." />;
 
@@ -23,8 +28,21 @@ export default function InvoiceScreen() {
     const subtotal = (courier.weight || 0) * 5 + (courier.distance || 0) * 2 + 10;
     const expressSurcharge = isExpress ? subtotal * 0.5 : 0;
 
+    const handleMarkAsPaid = async () => {
+        setIsUpdating(true);
+        try {
+            await markAsPaid({ id: courier._id });
+            Alert.alert('Success', 'Payment status updated to PAID.');
+        } catch (error) {
+            Alert.alert('Error', 'Failed to update payment status.');
+        } finally {
+            setIsUpdating(false);
+        }
+    };
+
     // Generate HTML for printing
     const generateHtml = () => {
+        const isPaid = courier.paymentStatus === 'paid';
         return `
             <html>
                 <head>
@@ -42,13 +60,15 @@ export default function InvoiceScreen() {
                         .total { text-align: right; margin-top: 20px; font-size: 24px; font-weight: bold; }
                         .footer { margin-top: 50px; text-align: center; color: #888; font-size: 12px; }
                         .surcharge { color: #e67e22; font-weight: bold; }
+                        .status-paid { color: #10b981; font-weight: bold; border: 2px solid #10b981; padding: 5px 10px; display: inline-block; margin-top: 10px; }
+                        .status-unpaid { color: #f59e0b; font-weight: bold; border: 2px solid #f59e0b; padding: 5px 10px; display: inline-block; margin-top: 10px; }
                     </style>
                 </head>
                 <body>
                     <div class="header">
                         <div class="title">INVOICE</div>
                         <div class="company">
-                            <strong>Courier Express</strong><br>
+                            <strong>Courier Manager</strong><br>
                             Logistics Way<br>
                             support@courier.com
                         </div>
@@ -58,9 +78,12 @@ export default function InvoiceScreen() {
                         <div class="row"><span class="label">Invoice No:</span> INV-${courier.trackingId}</div>
                         <div class="row"><span class="label">Date:</span> ${new Date(courier.createdAt).toLocaleDateString()}</div>
                         <div class="row"><span class="label">Tracking ID:</span> ${courier.trackingId}</div>
+                        <div class="${isPaid ? 'status-paid' : 'status-unpaid'}">
+                            ${(courier.paymentStatus || 'pending').toUpperCase()}
+                        </div>
                     </div>
 
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 30px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 30px; margin-top: 20px;">
                         <div>
                             <strong>Bill To:</strong><br>
                             ${courier.senderName}<br>
@@ -117,7 +140,7 @@ export default function InvoiceScreen() {
                     </div>
 
                     <div class="footer">
-                        Thank you for your business! | Payment Status: ${courier.paymentStatus || 'Pending'}
+                        Thank you for your business! | Mode: ${(courier.paymentMethod || 'cash').toUpperCase()}
                     </div>
                 </body>
             </html>
@@ -143,9 +166,6 @@ export default function InvoiceScreen() {
         try {
             const html = generateHtml();
             const { uri } = await Print.printToFileAsync({ html });
-            
-            // On mobile, the safest way to "download" is to use the share sheet 
-            // with save to files capability.
             await Sharing.shareAsync(uri, {
                 UTI: '.pdf',
                 mimeType: 'application/pdf',
@@ -254,6 +274,17 @@ export default function InvoiceScreen() {
                             <Text style={styles.totalValue}>₹{(courier.price || 0).toFixed(2)}</Text>
                         </View>
                     </View>
+
+                    {isAdmin && courier.paymentStatus !== 'paid' && (
+                        <Pressable 
+                            style={[styles.markAsPaidButton, isUpdating && { opacity: 0.6 }]} 
+                            onPress={handleMarkAsPaid}
+                            disabled={isUpdating}
+                        >
+                            <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                            <Text style={styles.markAsPaidText}>{isUpdating ? 'Updating...' : 'Mark as Paid'}</Text>
+                        </Pressable>
+                    )}
                 </View>
             </ScrollView>
         </SafeAreaView>
@@ -377,5 +408,20 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 8,
         fontWeight: 'bold',
+    },
+    markAsPaidButton: {
+        marginTop: spacing.xxl,
+        backgroundColor: colors.success,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 12,
+        borderRadius: 8,
+        gap: 8,
+    },
+    markAsPaidText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 14,
     },
 });

@@ -26,6 +26,7 @@ const statusFilters: { label: string; value: string }[] = [
     { label: 'Booked', value: 'booked' },
     { label: 'Picked Up', value: 'picked_up' },
     { label: 'Dispatched', value: 'dispatched' },
+    { label: 'In Transit', value: 'in_transit' },
     { label: 'Out', value: 'out_for_delivery' },
     { label: 'Delivered', value: 'delivered' },
     { label: 'Cancelled', value: 'cancelled' },

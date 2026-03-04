@@ -21,7 +21,7 @@ export function Logo({ size = 48, showText = false }: LogoProps) {
             {showText && (
                 <View style={styles.textContainer}>
                     <Text style={styles.brandTitle}>COURIER</Text>
-                    <Text style={styles.brandSubtitle}>EXPRESS</Text>
+                    <Text style={styles.brandSubtitle}>MANAGER</Text>
                 </View>
             )}
         </View>

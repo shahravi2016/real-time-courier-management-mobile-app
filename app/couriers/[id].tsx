@@ -29,6 +29,8 @@ const statusOptions: { label: string; value: CourierStatus }[] = [
     { label: 'Picked Up', value: 'picked_up' },
     { label: 'Arrived at Hub', value: 'dispatched' },
     { label: 'In Transit', value: 'in_transit' },
+    { label: 'Out for Delivery', value: 'out_for_delivery' },
+    { label: 'Delivered (Marks as Paid)', value: 'delivered' },
     { label: 'Cancelled', value: 'cancelled' },
 ];
 

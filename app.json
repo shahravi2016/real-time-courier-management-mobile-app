@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "Courier Express",
-    "slug": "courier-express",
+    "name": "Courier Manager",
+    "slug": "courier-manager",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "scheme": "courier-express",
+    "scheme": "courier-manager",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -22,7 +22,7 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.ravishah10.courierexpress"
+      "package": "com.ravishah10.couriermanager"
     },
     "web": {
       "favicon": "./assets/favicon.png",
