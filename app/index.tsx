@@ -322,6 +322,11 @@ export default function DashboardScreen() {
     };
 
     const handleAddBranch = async () => {
+        if (!isAdmin) {
+            Alert.alert('Unauthorized', 'Access restricted to administrators.');
+            return;
+        }
+
         const name = branchName.trim();
         const address = branchAddress.trim();
 
@@ -353,7 +358,7 @@ export default function DashboardScreen() {
             setBranchName('');
             setBranchAddress('');
             setShowAddBranch(false);
-            Alert.alert('Success', 'Branch created successfully');
+            Alert.alert('Success', 'Branch hub created successfully');
         } catch (e) {
             console.error('Branch creation error:', e);
             Alert.alert('System Error', 'Failed to create branch. Please check your connection.');
