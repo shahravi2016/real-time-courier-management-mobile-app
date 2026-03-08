@@ -8,6 +8,7 @@ import { StatCard, LoadingState, ErrorState, Logo, AnalyticsChart } from '../src
 import { colors, spacing, fontSize, globalStyles } from '../src/styles/theme';
 import { useAuth } from '../src/components/auth-context';
 import { Ionicons } from '@expo/vector-icons';
+import { validateEmail, validateName, validatePhone, showAlert } from '../src/utils/validation';
 
 function getGreeting(): string {
     const h = new Date().getHours();
@@ -103,7 +104,18 @@ export default function DashboardScreen() {
 
     const handleUpdateManagerProfile = async () => {
         if (!selectedManager || !editMgrName || !editMgrEmail || !editMgrPassword || !editMgrBranchId) {
-            Alert.alert('Error', 'All fields are required.');
+            showAlert('Validation Error', 'All fields are required.');
+            return;
+        }
+
+        const nameValid = validateName(editMgrName, 'Manager Name');
+        if (!nameValid.isValid) return showAlert('Validation Error', nameValid.message!);
+
+        const emailValid = validateEmail(editMgrEmail);
+        if (!emailValid.isValid) return showAlert('Validation Error', emailValid.message!);
+
+        if (editMgrPassword.length < 6) {
+            showAlert('Security Error', 'Password must be at least 6 characters.');
             return;
         }
 
@@ -111,8 +123,8 @@ export default function DashboardScreen() {
         try {
             await updateManager({
                 id: selectedManager._id,
-                name: editMgrName,
-                email: editMgrEmail,
+                name: editMgrName.trim(),
+                email: editMgrEmail.trim(),
                 password: editMgrPassword,
                 branchId: editMgrBranchId as any,
             });
@@ -126,7 +138,44 @@ export default function DashboardScreen() {
         }
     };
 
+    const handleUpdateAgentProfile = async () => {
+        if (!selectedAgent || !editAgentName || !editAgentEmail || !editAgentPassword) {
+            showAlert('Validation Error', 'Name, Email and Password are required.');
+            return;
+        }
+
+        const nameValid = validateName(editAgentName, 'Agent Name');
+        if (!nameValid.isValid) return showAlert('Validation Error', nameValid.message!);
+
+        const emailValid = validateEmail(editAgentEmail);
+        if (!emailValid.isValid) return showAlert('Validation Error', emailValid.message!);
+
+        if (editAgentPassword.length < 6) {
+            showAlert('Security Error', 'Password must be at least 6 characters.');
+            return;
+        }
+
+        setIsUpdatingAgentProfile(true);
+        try {
+            await updateAgent({
+                id: selectedAgent._id,
+                name: editAgentName.trim(),
+                email: editAgentEmail.trim(),
+                password: editAgentPassword,
+                branchId: editAgentBranchId ? editAgentBranchId as any : undefined,
+            });
+            setIsEditingAgentProfile(false);
+            setShowAgentDetailModal(false);
+            Alert.alert('Success', 'Agent profile updated.');
+        } catch (e: any) {
+            Alert.alert('Update Failed', e.message || 'Check connection.');
+        } finally {
+            setIsUpdatingAgentProfile(false);
+        }
+    };
+
     const handleDeleteBranch = (id: string, name: string) => {
+        if (!isAdmin) return;
         Alert.alert(
             'Delete Branch',
             `Are you sure you want to delete ${name}? All data associated with this hub will be affected.`,
@@ -153,8 +202,12 @@ export default function DashboardScreen() {
     };
 
     const handleUpdateBranch = async () => {
-        if (!selectedBranch || !branchName || !branchAddress) {
-            Alert.alert('Error', 'Name and Address are required.');
+        if (!isAdmin) return;
+        const nameValid = validateName(branchName, 'Branch Name');
+        if (!nameValid.isValid) return showAlert('Validation Error', nameValid.message!);
+
+        if (!branchAddress.trim()) {
+            showAlert('Validation Error', 'Branch address is required.');
             return;
         }
 
@@ -162,8 +215,8 @@ export default function DashboardScreen() {
         try {
             await updateBranch({
                 id: selectedBranch._id,
-                name: branchName,
-                address: branchAddress,
+                name: branchName.trim(),
+                address: branchAddress.trim(),
             });
             setShowBranchDetailModal(false);
             Alert.alert('Success', 'Branch details updated.');
@@ -189,16 +242,23 @@ export default function DashboardScreen() {
                     const [isCreatingAgent, setIsCreatingAgent] = useState(false);
                 
                     const handleAddAgent = async () => {
-                        if (!agentName || !agentEmail || !agentPassword) {
-                            Alert.alert('Error', 'Name, Email and Password are required.');
+                        if (!isAdmin) return;
+                        const nameValid = validateName(agentName, 'Agent Name');
+                        if (!nameValid.isValid) return showAlert('Validation Error', nameValid.message!);
+
+                        const emailValid = validateEmail(agentEmail);
+                        if (!emailValid.isValid) return showAlert('Validation Error', emailValid.message!);
+
+                        if (agentPassword.length < 6) {
+                            showAlert('Security Error', 'Password must be at least 6 characters.');
                             return;
                         }
                 
                         setIsCreatingAgent(true);
                         try {
                             await createAgent({
-                                name: agentName,
-                                email: agentEmail,
+                                name: agentName.trim(),
+                                email: agentEmail.trim(),
                                 password: agentPassword,
                                 branchId: agentBranchId ? agentBranchId as any : undefined,
                             });
@@ -216,6 +276,7 @@ export default function DashboardScreen() {
                     };
             
                     const handleDeleteAgent = (id: string, name: string) => {
+                        if (!isAdmin) return;
                         Alert.alert(
                             'Delete Delivery Agent',
                             `Are you sure you want to delete ${name}? This will remove them from the fleet and revoke access.`,
@@ -241,7 +302,9 @@ export default function DashboardScreen() {
                         );
                     };
                 
-                    const handleDeleteManager = (id: string, name: string) => {            Alert.alert(
+                    const handleDeleteManager = (id: string, name: string) => {
+                        if (!isAdmin) return;
+                        Alert.alert(
                 'Delete Manager',
                 `Are you sure you want to delete ${name}? This will revoke their access to the system.`,
                 [
@@ -272,6 +335,7 @@ export default function DashboardScreen() {
     const [isAssigningAgent, setIsAssigningAgent] = useState(false);
 
     const handleAssignAgent = async () => {
+        if (!isAdmin) return;
         if (!selectedAgentId || !selectedBranchId) {
             Alert.alert('Error', 'Please select both an agent and a branch.');
             return;
@@ -295,16 +359,28 @@ export default function DashboardScreen() {
     };
 
     const handleAddManager = async () => {
-        if (!mgrName || !mgrEmail || !mgrPassword || !mgrBranchId) {
-            Alert.alert('Error', 'Please fill all manager details including branch.');
+        if (!isAdmin) return;
+        const nameValid = validateName(mgrName, 'Manager Name');
+        if (!nameValid.isValid) return showAlert('Validation Error', nameValid.message!);
+
+        const emailValid = validateEmail(mgrEmail);
+        if (!emailValid.isValid) return showAlert('Validation Error', emailValid.message!);
+
+        if (mgrPassword.length < 6) {
+            showAlert('Security Error', 'Password must be at least 6 characters.');
+            return;
+        }
+
+        if (!mgrBranchId) {
+            showAlert('Validation Error', 'Please select a branch.');
             return;
         }
 
         setIsCreatingManager(true);
         try {
             await createManager({
-                name: mgrName,
-                email: mgrEmail,
+                name: mgrName.trim(),
+                email: mgrEmail.trim(),
                 password: mgrPassword,
                 branchId: mgrBranchId as any,
             });
@@ -327,26 +403,22 @@ export default function DashboardScreen() {
             return;
         }
 
-        const name = branchName.trim();
+        const nameValid = validateName(branchName, 'Branch Name');
+        if (!nameValid.isValid) return showAlert('Validation Error', nameValid.message!);
+
         const address = branchAddress.trim();
-
-        if (!name || !address) {
-            Alert.alert('Validation Error', 'Both branch name and address are required.');
-            return;
-        }
-
-        if (name.length < 3) {
-            Alert.alert('Validation Error', 'Branch name must be at least 3 characters long.');
+        if (!address) {
+            showAlert('Validation Error', 'Branch address is required.');
             return;
         }
 
         if (address.length < 10) {
-            Alert.alert('Validation Error', 'Please provide a more detailed address (min 10 characters).');
+            showAlert('Validation Error', 'Please provide a more detailed address (min 10 characters).');
             return;
         }
 
         // Check for duplicate names locally if possible
-        const isDuplicate = branches?.some(b => b.name.toLowerCase() === name.toLowerCase());
+        const isDuplicate = branches?.some(b => b.name.toLowerCase() === branchName.trim().toLowerCase());
         if (isDuplicate) {
             Alert.alert('Duplicate Branch', 'A branch with this name already exists.');
             return;
@@ -354,7 +426,7 @@ export default function DashboardScreen() {
 
         setIsCreatingBranch(true);
         try {
-            await createBranch({ name, address });
+            await createBranch({ name: branchName.trim(), address });
             setBranchName('');
             setBranchAddress('');
             setShowAddBranch(false);

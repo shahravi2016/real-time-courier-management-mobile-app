@@ -8,6 +8,7 @@ import { FormInput, LoadingState } from '../../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { Id } from '../../convex/_generated/dataModel';
+import { validateName, validatePhone, showAlert } from '../../src/utils/validation';
 
 import { useAuth } from '../../src/components/auth-context';
 
@@ -84,57 +85,72 @@ export default function AddCourierScreen() {
     })();
 
     const validate = () => {
-        const newErrors: Record<string, string> = {};
-
         // Authentication/Identity Check
         if (!user) {
-            Alert.alert('Auth Error', 'You must be logged in to book a courier.');
+            showAlert('Auth Error', 'You must be logged in to book a courier.');
             return false;
         }
 
-        if (!form.senderName.trim()) newErrors.senderName = 'Sender name is required';
-        
-        // Proper Phone Validation
-        const phoneRegex = /^[6-9]\d{9}$/;
-        if (!form.senderPhone.trim()) {
-            newErrors.senderPhone = 'Sender phone is required';
-        } else if (!phoneRegex.test(form.senderPhone.replace(/\D/g, ''))) {
-            newErrors.senderPhone = 'Enter a valid 10-digit phone number';
+        const nameValid = validateName(form.senderName, 'Sender Name');
+        if (!nameValid.isValid) {
+            showAlert('Validation Error', nameValid.message!);
+            return false;
         }
 
-        if (!form.receiverName.trim()) newErrors.receiverName = 'Receiver name is required';
-        if (!form.receiverPhone.trim()) {
-            newErrors.receiverPhone = 'Receiver phone is required';
-        } else if (!phoneRegex.test(form.receiverPhone.replace(/\D/g, ''))) {
-            newErrors.receiverPhone = 'Enter a valid 10-digit phone number';
+        const sPhoneValid = validatePhone(form.senderPhone);
+        if (!sPhoneValid.isValid) {
+            showAlert('Validation Error', sPhoneValid.message!);
+            return false;
         }
 
-        if (!form.pickupAddress.trim()) newErrors.pickupAddress = 'Pickup address is required';
-        if (!form.deliveryAddress.trim()) newErrors.deliveryAddress = 'Delivery address is required';
+        const rNameValid = validateName(form.receiverName, 'Receiver Name');
+        if (!rNameValid.isValid) {
+            showAlert('Validation Error', rNameValid.message!);
+            return false;
+        }
+
+        const rPhoneValid = validatePhone(form.receiverPhone);
+        if (!rPhoneValid.isValid) {
+            showAlert('Validation Error', rPhoneValid.message!);
+            return false;
+        }
+
+        if (!form.pickupAddress.trim()) {
+            showAlert('Validation Error', 'Pickup address is required');
+            return false;
+        }
+        if (!form.deliveryAddress.trim()) {
+            showAlert('Validation Error', 'Delivery address is required');
+            return false;
+        }
 
         // Staff-only fields validation
         if (isStaff) {
             const w = parseFloat(form.weight);
             if (isNaN(w) || w <= 0) {
-                newErrors.weight = 'Valid weight required for staff booking';
+                showAlert('Validation Error', 'Valid weight required for staff booking');
+                return false;
             } else if (w > 500) {
-                newErrors.weight = 'Weight cannot exceed 500kg';
+                showAlert('Validation Error', 'Weight cannot exceed 500kg');
+                return false;
             }
 
             const d = parseFloat(form.distance);
             if (isNaN(d) || d <= 0) {
-                newErrors.distance = 'Valid distance required for staff booking';
+                showAlert('Validation Error', 'Valid distance required for staff booking');
+                return false;
             } else if (d > 2000) {
-                newErrors.distance = 'Distance cannot exceed 2000km';
+                showAlert('Validation Error', 'Distance cannot exceed 2000km');
+                return false;
             }
 
             if (!form.branchId) {
-                newErrors.branch = 'Staff must assign a branch hub';
+                showAlert('Validation Error', 'Staff must assign a branch hub');
+                return false;
             }
         }
 
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
+        return true;
     };
 
     const handleSubmit = async () => {
@@ -224,7 +240,7 @@ export default function AddCourierScreen() {
                     <FormInput
                         label="Sender Phone"
                         value={form.senderPhone}
-                        onChangeText={(v) => updateField('senderPhone', v.replace(/\D/g, ''))}
+                        onChangeText={(v) => updateField('senderPhone', v)}
                         placeholder="10-digit sender phone"
                         keyboardType="phone-pad"
                         error={errors.senderPhone}
@@ -242,7 +258,7 @@ export default function AddCourierScreen() {
                     <FormInput
                         label="Receiver Phone"
                         value={form.receiverPhone}
-                        onChangeText={(v) => updateField('receiverPhone', v.replace(/\D/g, ''))}
+                        onChangeText={(v) => updateField('receiverPhone', v)}
                         placeholder="10-digit phone number"
                         keyboardType="phone-pad"
                         error={errors.receiverPhone}

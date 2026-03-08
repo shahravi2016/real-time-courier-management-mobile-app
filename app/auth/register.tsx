@@ -6,6 +6,7 @@ import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { validateEmail, validateName, validatePhone, showAlert } from '../../src/utils/validation';
 
 const ROLES = [
     { label: 'Customer', value: 'customer' },
@@ -25,33 +26,33 @@ export default function RegisterScreen() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const handleRegister = async () => {
-        if (!form.name.trim() || !form.email.trim() || !form.password) {
-            Alert.alert('Required Fields', 'Name, Email, and Password are mandatory.');
+        // Name Validation
+        const nameValid = validateName(form.name, 'Full Name');
+        if (!nameValid.isValid) {
+            showAlert('Registration Error', nameValid.message!);
             return;
         }
 
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(form.email.trim())) {
-            Alert.alert('Invalid Email', 'Please enter a valid email address.');
+        // Email Validation
+        const emailValid = validateEmail(form.email);
+        if (!emailValid.isValid) {
+            showAlert('Registration Error', emailValid.message!);
             return;
         }
 
+        // Password Validation
         if (form.password.length < 6) {
-            Alert.alert('Weak Password', 'Password must be at least 6 characters long.');
+            showAlert('Registration Error', 'Password must be at least 6 characters long.');
             return;
         }
 
-        if (form.phone) {
-            const digits = form.phone.replace(/\D/g, '');
-            if (digits.length > 0 && digits.length !== 10) {
-                Alert.alert('Invalid Phone', 'Phone number must be 10 digits.');
+        // Phone Validation (Optional in DB but enforced format if provided)
+        if (form.phone.trim()) {
+            const phoneValid = validatePhone(form.phone);
+            if (!phoneValid.isValid) {
+                showAlert('Registration Error', phoneValid.message!);
                 return;
             }
-        }
-
-        if (form.name.trim().length < 3) {
-            Alert.alert('Invalid Name', 'Full name must be at least 3 characters.');
-            return;
         }
 
         setIsSubmitting(true);

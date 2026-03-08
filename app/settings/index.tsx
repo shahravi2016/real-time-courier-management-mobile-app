@@ -6,9 +6,7 @@ import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
 import { FormInput } from '../../src/components';
-import { colors, spacing, globalStyles, fontSize } from '../../src/styles/theme';
-import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../../src/components/auth-context';
+import { validateEmail, validateName, validatePhone, showAlert } from '../../src/utils/validation';
 
 export default function SettingsScreen() {
     const router = useRouter();
@@ -50,16 +48,26 @@ export default function SettingsScreen() {
     };
 
     const validate = () => {
-        const newErrors: Record<string, string> = {};
-        if (!form.name.trim()) newErrors.name = 'Name is required';
-        if (form.phone && form.phone.replace(/\D/g, '').length !== 10) {
-            newErrors.phone = 'Phone number must be exactly 10 digits';
+        const nameValid = validateName(form.name, 'Full Name');
+        if (!nameValid.isValid) {
+            showAlert('Validation Error', nameValid.message!);
+            return false;
         }
-        if (isAdmin && form.password && form.password.length < 6) {
-            newErrors.password = 'New password must be at least 6 characters';
+
+        const phoneValid = validatePhone(form.phone, true); // Phone is optional in settings
+        if (!phoneValid.isValid) {
+            showAlert('Validation Error', phoneValid.message!);
+            return false;
         }
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
+
+        if (isAdmin && form.password) {
+            if (form.password.length < 6) {
+                showAlert('Security Error', 'New password must be at least 6 characters.');
+                return false;
+            }
+        }
+        
+        return true;
     };
 
     const handleSave = async () => {
