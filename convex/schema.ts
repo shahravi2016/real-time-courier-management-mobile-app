@@ -40,6 +40,12 @@ export default defineSchema({
         invoiceId: v.optional(v.id("invoices")),
         podId: v.optional(v.id("proofOfDelivery")),
 
+        // Coordinates for automated distance
+        pickupLat: v.optional(v.number()),
+        pickupLng: v.optional(v.number()),
+        deliveryLat: v.optional(v.number()),
+        deliveryLng: v.optional(v.number()),
+
         createdAt: v.number(),
         updatedAt: v.number(),
     })

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { View, FlatList, TextInput, StyleSheet, Pressable, Text, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
 import { useQuery } from 'convex/react';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';

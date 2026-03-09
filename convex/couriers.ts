@@ -123,6 +123,122 @@ export const getStats = query({
     },
 });
 
+// Admin Dashboard Stats
+export const getAdminDashboardStats = query({
+    args: {},
+    handler: async (ctx) => {
+        const allCouriers = await ctx.db.query("couriers").collect();
+        const allBranches = await ctx.db.query("branches").collect();
+
+        const branchContribution = allBranches.map(b => {
+            const branchCouriers = allCouriers.filter(c => c.branchId === b._id);
+            return {
+                name: b.name,
+                count: branchCouriers.length,
+                revenue: branchCouriers.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0)
+            };
+        });
+
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+        const monthlyOrders = allCouriers.filter(c => c.createdAt >= startOfMonth).reduce((acc: any, c) => {
+            const day = new Date(c.createdAt).getDate();
+            acc[day] = (acc[day] || 0) + 1;
+            return acc;
+        }, {});
+
+        const revenueTrends = allCouriers.filter(c => c.currentStatus === "delivered" && c.createdAt >= startOfMonth).reduce((acc: any, c) => {
+            const day = new Date(c.createdAt).getDate();
+            acc[day] = (acc[day] || 0) + (c.price || 0);
+            return acc;
+        }, {});
+
+        return {
+            global: {
+                total: allCouriers.length,
+                revenue: allCouriers.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0),
+            },
+            branchContribution,
+            monthlyOrders,
+            revenueTrends
+        };
+    },
+});
+
+// Branch Manager Stats
+export const getBranchDashboardStats = query({
+    args: { branchId: v.id("branches") },
+    handler: async (ctx, args) => {
+        const myCouriers = await ctx.db.query("couriers").withIndex("by_branchId", q => q.eq("branchId", args.branchId)).collect();
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+        return {
+            statusCounts: {
+                booked: myCouriers.filter(c => c.currentStatus === "booked").length,
+                inTransit: myCouriers.filter(c => ["in_transit", "dispatched"].includes(c.currentStatus)).length,
+                outForDelivery: myCouriers.filter(c => c.currentStatus === "out_for_delivery").length,
+                delivered: myCouriers.filter(c => c.currentStatus === "delivered").length,
+            },
+            monthlyOrders: myCouriers.filter(c => c.createdAt >= startOfMonth).reduce((acc: any, c) => {
+                const day = new Date(c.createdAt).getDate();
+                acc[day] = (acc[day] || 0) + 1;
+                return acc;
+            }, {}),
+            branchRevenue: myCouriers.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0),
+            revenueTrends: myCouriers.filter(c => c.currentStatus === "delivered" && c.createdAt >= startOfMonth).reduce((acc: any, c) => {
+                const day = new Date(c.createdAt).getDate();
+                acc[day] = (acc[day] || 0) + (c.price || 0);
+                return acc;
+            }, {}),
+        };
+    },
+});
+
+// Agent Stats
+export const getAgentStats = query({
+    args: { userId: v.id("users") },
+    handler: async (ctx, args) => {
+        const myJobs = await ctx.db.query("couriers").withIndex("by_assignedTo", q => q.eq("assignedTo", args.userId)).collect();
+        const completed = myJobs.filter(j => j.currentStatus === "delivered");
+        return {
+            totalJobs: myJobs.length,
+            activeJobs: myJobs.filter(j => !["delivered", "cancelled"].includes(j.currentStatus)).length,
+            completedJobs: completed.length,
+            earnings: completed.reduce((sum, j) => sum + ((j.price || 0) * 0.1), 0),
+            target: completed.length + 10,
+        };
+    },
+});
+
+// Customer Stats
+export const getCustomerStats = query({
+    args: { userId: v.id("users") },
+    handler: async (ctx, args) => {
+        const user = await ctx.db.get(args.userId);
+        if (!user || !user.phone) return { inTransit: 0, delivered: 0, pending: 0, total: 0 };
+
+        const phone = user.phone;
+
+        // Efficient Indexed Lookups
+        const sent = await ctx.db.query("couriers").withIndex("by_senderPhone", q => q.eq("senderPhone", phone)).collect();
+        const received = await ctx.db.query("couriers").withIndex("by_receiverPhone", q => q.eq("receiverPhone", phone)).collect();
+        const byName = await ctx.db.query("couriers").withIndex("by_senderName", q => q.eq("senderName", user.name)).collect();
+
+        const map = new Map<Id<"couriers">, any>();
+        [...sent, ...received, ...byName].forEach(c => map.set(c._id, c));
+        const myParcels = Array.from(map.values());
+
+        return {
+            inTransit: myParcels.filter(c => ["in_transit", "dispatched", "out_for_delivery"].includes(c.currentStatus)).length,
+            delivered: myParcels.filter(c => c.currentStatus === "delivered").length,
+            pending: myParcels.filter(c => ["booked", "picked_up"].includes(c.currentStatus)).length,
+            total: myParcels.length,
+        };
+    },
+});
+
 export const getMyCouriers = query({
     args: {
         userId: v.id("users"),
