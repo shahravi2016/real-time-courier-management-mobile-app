@@ -2,7 +2,22 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
-// Generate a unique tracking ID
+// --- Helpers ---
+const normalizePhone = (p: string) => p.replace(/\D/g, "");
+
+// Haversine Distance Formula (Returns KM)
+function calculateHaversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+}
+
 // Helper to generate 4-digit OTP
 function generateOTP(): string {
     return Math.floor(1000 + Math.random() * 9000).toString();
@@ -14,15 +29,39 @@ function generateTrackingId(): string {
     return `${prefix}-${random}`;
 }
 
-// Generate Invoice Number
 function generateInvoiceNumber(): string {
     return `INV-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
 }
 
-// List all couriers (realtime subscription)
+// --- Pricing Engine ---
+const BASE_RATE = 50; 
+const WEIGHT_RATE = 10; 
+const DISTANCE_RATE = 5; 
+
+function calculatePrice(weight?: number, distance?: number, type?: "normal" | "express") {
+    let price = BASE_RATE;
+    if (weight) price += weight * WEIGHT_RATE;
+    if (distance) price += distance * DISTANCE_RATE;
+    if (type === "express") price *= 1.5; 
+    return Math.round(price);
+}
+
+// --- Queries ---
+
+// List couriers with Unassigned Filter support
 export const list = query({
-    args: { branchId: v.optional(v.id("branches")) },
+    args: { 
+        branchId: v.optional(v.id("branches")),
+        unassignedOnly: v.optional(v.boolean()) 
+    },
     handler: async (ctx, args) => {
+        if (args.unassignedOnly) {
+            return await ctx.db
+                .query("couriers")
+                .filter(q => q.eq(q.field("branchId"), undefined))
+                .order("desc")
+                .collect();
+        }
         if (args.branchId) {
             return await ctx.db
                 .query("couriers")
@@ -30,47 +69,60 @@ export const list = query({
                 .order("desc")
                 .collect();
         }
-        return await ctx.db
-            .query("couriers")
-            .order("desc")
-            .collect();
+        return await ctx.db.query("couriers").order("desc").collect();
     },
 });
 
-// Get courier by ID (with relations)
 export const getById = query({
-    args: { id: v.id("couriers") },
+    args: { 
+        id: v.id("couriers"),
+        userId: v.optional(v.string())
+    },
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
         if (!courier) return null;
 
-        // Fail-safe: If delivered, it must be paid. If cancelled, it might be unpaid/void.
-        let paymentStatus = courier.paymentStatus;
-        if (courier.currentStatus === "delivered") {
-            paymentStatus = "paid";
-        }
-
-        let pod = null;
-        if (courier.podId) {
-            pod = await ctx.db.get(courier.podId);
-        }
-
-        let invoice = null;
-        if (courier.invoiceId) {
-            invoice = await ctx.db.get(courier.invoiceId);
-            // Sync invoice status too in-memory for the UI
-            if (courier.currentStatus === "delivered" && invoice && invoice.status !== "paid") {
-                invoice.status = "paid";
+        if (args.userId) {
+            const user = await ctx.db.get(args.userId as Id<"users">);
+            if (user && user.role === "customer") {
+                const uPhone = normalizePhone(user.phone || "");
+                const sPhone = normalizePhone(courier.senderPhone || "");
+                const rPhone = normalizePhone(courier.receiverPhone);
+                const isOwner = sPhone === uPhone || rPhone === uPhone || courier.senderName === user.name;
+                if (!isOwner) return null;
+            } else if (user && user.role === "agent") {
+                if (courier.assignedTo !== args.userId && courier.branchId !== user.branchId) return null;
             }
         }
 
-        return { ...courier, paymentStatus, pod, invoice };
+        let pod = courier.podId ? await ctx.db.get(courier.podId) : null;
+        let invoice = courier.invoiceId ? await ctx.db.get(courier.invoiceId) : null;
+        return { ...courier, pod, invoice };
     },
 });
 
-const normalizePhone = (p: string) => p.replace(/\D/g, "");
+// Stats with "Needs Attention" (Orphaned) support
+export const getStats = query({
+    args: { branchId: v.optional(v.id("branches")) },
+    handler: async (ctx, args) => {
+        let all = args.branchId 
+            ? await ctx.db.query("couriers").withIndex("by_branchId", q => q.eq("branchId", args.branchId)).collect()
+            : await ctx.db.query("couriers").collect();
 
-// Get couriers for specific user (Agent or Customer)
+        // Needs Attention = Booked but no branch assigned (orphaned customer bookings)
+        const needsAttention = all.filter(c => c.currentStatus === "booked" && !c.branchId).length;
+
+        return {
+            total: all.length,
+            booked: all.filter(c => c.currentStatus === "booked").length,
+            outForDelivery: all.filter(c => c.currentStatus === "out_for_delivery").length,
+            delivered: all.filter(c => c.currentStatus === "delivered").length,
+            needsAttention, 
+            revenue: all.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0),
+        };
+    },
+});
+
 export const getMyCouriers = query({
     args: {
         userId: v.id("users"),
@@ -78,287 +130,30 @@ export const getMyCouriers = query({
     },
     handler: async (ctx, args) => {
         if (args.role === "agent") {
-            return await ctx.db
-                .query("couriers")
-                .withIndex("by_assignedTo", (q) => q.eq("assignedTo", args.userId))
-                .order("desc")
-                .collect();
+            return await ctx.db.query("couriers").withIndex("by_assignedTo", (q) => q.eq("assignedTo", args.userId)).order("desc").collect();
         } else if (args.role === "customer") {
-            // For customer: Fetch user to get their phone number
             const user = await ctx.db.get(args.userId);
             if (!user || !user.phone) return [];
-
-            const phone = normalizePhone(user.phone);
-
-            // Return couriers where user is sender or receiver
-            const all = await ctx.db.query("couriers").collect();
-
-            return all.filter(c => {
-                const rPhone = normalizePhone(c.receiverPhone);
-                const sPhone = normalizePhone((c as any).senderPhone || "");
-                return rPhone === phone || sPhone === phone || c.senderName === user.name;
-            })
-                .sort((a, b) => b.createdAt - a.createdAt);
-        } else {
-            return [];
-        }
-    },
-});
-
-// Get general stats (optionally filtered by branch)
-export const getStats = query({
-    args: { branchId: v.optional(v.id("branches")) },
-    handler: async (ctx, args) => {
-        let all;
-        if (args.branchId) {
-            all = await ctx.db
-                .query("couriers")
-                .withIndex("by_branchId", (q) => q.eq("branchId", args.branchId))
+            const phone = user.phone;
+            const sent = await ctx.db.query("couriers")
+                .withIndex("by_senderPhone", q => q.eq("senderPhone", phone))
                 .collect();
-        } else {
-            all = await ctx.db.query("couriers").collect();
-        }
-
-        const stats = {
-            total: all.length,
-            booked: all.filter((c) => c.currentStatus === "booked").length,
-            pickedUp: all.filter((c) => c.currentStatus === "picked_up").length,
-            dispatched: all.filter((c) => c.currentStatus === "dispatched").length,
-            outForDelivery: all.filter((c) => c.currentStatus === "out_for_delivery").length,
-            delivered: all.filter((c) => c.currentStatus === "delivered").length,
-            cancelled: all.filter((c) => c.currentStatus === "cancelled").length,
-            revenue: all
-                .filter((c) => c.currentStatus === "delivered")
-                .reduce((sum, c) => sum + (c.price || 0), 0),
-        };
-
-        return stats;
-    },
-});
-
-// Admin Dashboard Stats: global and branch comparison
-export const getAdminDashboardStats = query({
-    args: {},
-    handler: async (ctx) => {
-        const allCouriers = await ctx.db.query("couriers").collect();
-        const allBranches = await ctx.db.query("branches").collect();
-
-        // 1. Branch Contribution (Pie Chart Data)
-        const branchContribution = allBranches.map(b => {
-            const branchCouriers = allCouriers.filter(c => c.branchId === b._id);
-            return {
-                name: b.name,
-                count: branchCouriers.length,
-                revenue: branchCouriers
-                    .filter(c => c.currentStatus === "delivered")
-                    .reduce((sum, c) => sum + (c.price || 0), 0)
-            };
-        });
-
-        // 2. Orders for current month (Graph Data - daily for last 30 days or weekly)
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-
-        const monthlyOrders = allCouriers
-            .filter(c => c.createdAt >= startOfMonth)
-            .reduce((acc: any, c) => {
-                const day = new Date(c.createdAt).getDate();
-                acc[day] = (acc[day] || 0) + 1;
-                return acc;
-            }, {});
-
-        // 3. Revenue Trends (Graph Data)
-        const revenueTrends = allCouriers
-            .filter(c => c.currentStatus === "delivered" && c.createdAt >= startOfMonth)
-            .reduce((acc: any, c) => {
-                const day = new Date(c.createdAt).getDate();
-                acc[day] = (acc[day] || 0) + (c.price || 0);
-                return acc;
-            }, {});
-
-        return {
-            global: {
-                total: allCouriers.length,
-                revenue: allCouriers
-                    .filter(c => c.currentStatus === "delivered")
-                    .reduce((sum, c) => sum + (c.price || 0), 0),
-            },
-            branchContribution,
-            monthlyOrders,
-            revenueTrends
-        };
-    },
-});
-
-// Branch Manager Dashboard Stats
-export const getBranchDashboardStats = query({
-    args: { branchId: v.id("branches") },
-    handler: async (ctx, args) => {
-        const myCouriers = await ctx.db
-            .query("couriers")
-            .withIndex("by_branchId", (q) => q.eq("branchId", args.branchId))
-            .collect();
-
-        // 1. Status distribution (Pie Chart Data)
-        const statusCounts = {
-            booked: myCouriers.filter(c => c.currentStatus === "booked").length,
-            inTransit: myCouriers.filter(c => c.currentStatus === "in_transit" || c.currentStatus === "dispatched").length,
-            outForDelivery: myCouriers.filter(c => c.currentStatus === "out_for_delivery").length,
-            delivered: myCouriers.filter(c => c.currentStatus === "delivered").length,
-        };
-
-        // 2. Orders for current month for this branch
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-
-        const monthlyOrders = myCouriers
-            .filter(c => c.createdAt >= startOfMonth)
-            .reduce((acc: any, c) => {
-                const day = new Date(c.createdAt).getDate();
-                acc[day] = (acc[day] || 0) + 1;
-                return acc;
-            }, {});
-
-        // 3. Branch Revenue
-        const branchRevenue = myCouriers
-            .filter(c => c.currentStatus === "delivered")
-            .reduce((sum, c) => sum + (c.price || 0), 0);
-
-        const revenueTrends = myCouriers
-            .filter(c => c.currentStatus === "delivered" && c.createdAt >= startOfMonth)
-            .reduce((acc: any, c) => {
-                const day = new Date(c.createdAt).getDate();
-                acc[day] = (acc[day] || 0) + (c.price || 0);
-                return acc;
-            }, {});
-
-        return {
-            statusCounts,
-            monthlyOrders,
-            branchRevenue,
-            revenueTrends
-        };
-    },
-});
-
-// Get Agent specific stats
-export const getAgentStats = query({
-    args: { userId: v.id("users") },
-    handler: async (ctx, args) => {
-        const myJobs = await ctx.db
-            .query("couriers")
-            .withIndex("by_assignedTo", (q) => q.eq("assignedTo", args.userId))
-            .collect();
-
-        const completed = myJobs.filter(j => j.currentStatus === "delivered");
-
-        return {
-            totalJobs: myJobs.length,
-            activeJobs: myJobs.filter(j => !["delivered", "cancelled"].includes(j.currentStatus)).length,
-            completedJobs: completed.length,
-            // Assuming 10% commission for the agent for demo purposes
-            earnings: completed.reduce((sum, j) => sum + ((j.price || 0) * 0.1), 0),
-            target: completed.length + 10, // Dynamic target based on performance
-        };
-    },
-});
-
-// Get recent couriers for dashboard
-export const getRecent = query({
-    args: {},
-    handler: async (ctx) => {
-        return await ctx.db
-            .query("couriers")
-            .order("desc")
-            .take(5);
-    },
-});
-
-// Get Customer specific stats
-export const getCustomerStats = query({
-    args: { userId: v.id("users") },
-    handler: async (ctx, args) => {
-        const user = await ctx.db.get(args.userId);
-        if (!user || !user.phone) {
-            return { inTransit: 0, delivered: 0, pending: 0, total: 0 };
-        }
-
-        const phone = normalizePhone(user.phone);
-        const all = await ctx.db.query("couriers").collect();
-        // Return couriers where user is sender or receiver
-        const myParcels = all.filter(c => {
-            const rPhone = normalizePhone(c.receiverPhone);
-            const sPhone = normalizePhone((c as any).senderPhone || "");
-            return rPhone === phone || sPhone === phone || c.senderName === user.name;
-        });
-
-        return {
-            inTransit: myParcels.filter(c => c.currentStatus === "in_transit" || c.currentStatus === "dispatched" || c.currentStatus === "out_for_delivery").length,
-            delivered: myParcels.filter(c => c.currentStatus === "delivered").length,
-            pending: myParcels.filter(c => c.currentStatus === "booked" || c.currentStatus === "picked_up").length,
-            total: myParcels.length,
-        };
-    },
-});
-
-// Search couriers
-export const search = query({
-    args: { searchTerm: v.string() },
-    handler: async (ctx, args) => {
-        const all = await ctx.db.query("couriers").collect();
-        const term = args.searchTerm.toLowerCase();
-
-        return all.filter(
-            (c) =>
-                c.trackingId.toLowerCase().includes(term) ||
-                c.receiverName.toLowerCase().includes(term) ||
-                c.receiverPhone.includes(term)
-        );
-    },
-});
-
-// Filter by status
-export const filterByStatus = query({
-    args: {
-        status: v.union(
-            v.literal("booked"),
-            v.literal("picked_up"),
-            v.literal("pending"),
-            v.literal("dispatched"),
-            v.literal("in_transit"),
-            v.literal("out_for_delivery"),
-            v.literal("delivered"),
-            v.literal("cancelled")
-        ),
-    },
-    handler: async (ctx, args) => {
-        return await ctx.db
-            .query("couriers")
-            .withIndex("by_status", (q) => q.eq("currentStatus", args.status))
-            .collect();
-    },
-});
-
-// Get logs
-export const getLogs = query({
-    args: { courierId: v.optional(v.id("couriers")) },
-    handler: async (ctx, args) => {
-        if (args.courierId) {
-            return await ctx.db
-                .query("logs")
-                .withIndex("by_courierId", (q) => q.eq("courierId", args.courierId))
-                .order("desc")
+            const received = await ctx.db.query("couriers")
+                .withIndex("by_receiverPhone", q => q.eq("receiverPhone", phone))
                 .collect();
+            const byName = await ctx.db.query("couriers")
+                .withIndex("by_senderName", q => q.eq("senderName", user.name))
+                .collect();
+            const map = new Map<Id<"couriers">, any>();
+            [...sent, ...received, ...byName].forEach(c => map.set(c._id, c));
+            return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
         }
-        return await ctx.db
-            .query("logs")
-            .withIndex("by_timestamp")
-            .order("desc")
-            .take(50);
+        return [];
     },
 });
 
-// Create a new courier
+// --- Mutations ---
+
 export const create = mutation({
     args: {
         senderName: v.string(),
@@ -368,93 +163,78 @@ export const create = mutation({
         pickupAddress: v.string(),
         deliveryAddress: v.string(),
         notes: v.optional(v.string()),
-        expectedDeliveryDate: v.optional(v.string()),
         weight: v.optional(v.number()),
         distance: v.optional(v.number()),
         price: v.optional(v.number()),
-        paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("prepaid"))),
         branchId: v.optional(v.id("branches")),
         bookedBy: v.optional(v.id("users")),
         deliveryType: v.optional(v.union(v.literal("normal"), v.literal("express"))),
+        // Coordinates for Haversine calculation
+        pickupLat: v.optional(v.number()),
+        pickupLng: v.optional(v.number()),
+        deliveryLat: v.optional(v.number()),
+        deliveryLng: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
         const now = Date.now();
         const trackingId = generateTrackingId();
         const otpCode = generateOTP();
 
-        // Calculate expected delivery date if not provided
-        let expectedDeliveryDate = args.expectedDeliveryDate;
-        if (!expectedDeliveryDate) {
-            const deliveryDays = (args.deliveryType || "normal") === "express" ? 2 : 5;
-            const date = new Date(now);
-            date.setDate(date.getDate() + deliveryDays);
-            expectedDeliveryDate = date.toISOString().split('T')[0];
+        // 1. Logic for Haversine distance
+        let distance = args.distance;
+        if (!distance && args.pickupLat && args.pickupLng && args.deliveryLat && args.deliveryLng) {
+            distance = calculateHaversine(args.pickupLat, args.pickupLng, args.deliveryLat, args.deliveryLng);
+            // Add a small 20% multiplier for road-distance approximation over crow-flies
+            distance = Math.round(distance * 1.2); 
         }
 
+        // 2. Final Price Calculation
+        const finalPrice = args.price || calculatePrice(args.weight, distance, args.deliveryType || "normal");
+
         const courierId = await ctx.db.insert("couriers", {
-            trackingId,
             senderName: args.senderName,
             senderPhone: args.senderPhone,
             receiverName: args.receiverName,
             receiverPhone: args.receiverPhone,
             pickupAddress: args.pickupAddress,
             deliveryAddress: args.deliveryAddress,
-            currentStatus: "booked",
             notes: args.notes,
-            expectedDeliveryDate,
             weight: args.weight,
-            distance: args.distance,
-            price: args.price,
-            paymentStatus: "pending",
-            paymentMethod: args.paymentMethod || "cash",
+            distance: distance,
+            price: finalPrice,
             branchId: args.branchId,
-            otpCode,
             bookedBy: args.bookedBy,
             deliveryType: args.deliveryType || "normal",
+            trackingId,
+            otpCode,
+            currentStatus: "booked",
+            paymentStatus: "pending",
             createdAt: now,
             updatedAt: now,
         });
 
-        // Automatically generate invoice
-        const invoiceId = await ctx.db.insert("invoices", {
+        await ctx.db.insert("invoices", {
             courierId,
             invoiceNumber: generateInvoiceNumber(),
-            amount: args.price || 0,
+            amount: finalPrice,
             customerName: args.senderName,
             customerAddress: args.pickupAddress,
             status: "unpaid",
             generatedAt: now,
         });
 
-        await ctx.db.patch(courierId, { invoiceId });
-
-        // Log creation
-        await ctx.db.insert("logs", {
-            courierId,
-            trackingId,
-            action: "created",
-            description: "Courier created",
-            timestamp: now,
+        await ctx.db.insert("logs", { 
+            courierId, 
+            trackingId, 
+            action: "created", 
+            description: `Courier created. Distance: ${distance || 0}km. Price: ₹${finalPrice}`, 
+            timestamp: now 
         });
-
+        
         return courierId;
     },
 });
 
-// Internal helper to sync payment and invoice status
-async function syncStatus(ctx: any, courierId: Id<"couriers">, status: string) {
-    const courier = await ctx.db.get(courierId);
-    if (!courier) return;
-
-    if (status === "delivered") {
-        await ctx.db.patch(courierId, { paymentStatus: "paid" });
-        if (courier.invoiceId) {
-            await ctx.db.patch(courier.invoiceId, { status: "paid" });
-        }
-    }
-}
-
-// Update courier details
 export const update = mutation({
     args: {
         id: v.id("couriers"),
@@ -464,77 +244,39 @@ export const update = mutation({
         pickupAddress: v.optional(v.string()),
         deliveryAddress: v.optional(v.string()),
         notes: v.optional(v.string()),
-        expectedDeliveryDate: v.optional(v.string()),
         weight: v.optional(v.number()),
         distance: v.optional(v.number()),
         price: v.optional(v.number()),
-        paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("prepaid"))),
-        paymentStatus: v.optional(v.union(v.literal("paid"), v.literal("unpaid"), v.literal("pending"))),
         branchId: v.optional(v.id("branches")),
     },
     handler: async (ctx, args) => {
         const { id, ...updates } = args;
         const courier = await ctx.db.get(id);
-        if (!courier) throw new Error("Courier not found");
+        if (!courier) throw new Error("Not found");
 
-        // Filter out undefined values
-        const filteredUpdates: Record<string, any> = {};
-        for (const [key, value] of Object.entries(updates)) {
-            if (value !== undefined) {
-                filteredUpdates[key] = value;
-            }
+        if (args.weight !== undefined || args.distance !== undefined) {
+            const newPrice = calculatePrice(args.weight ?? courier.weight, args.distance ?? courier.distance, courier.deliveryType);
+            (updates as any).price = newPrice;
         }
 
-        await ctx.db.patch(id, {
-            ...filteredUpdates,
-            updatedAt: Date.now(),
-        });
+        const filtered: any = {};
+        for (const [k, v] of Object.entries(updates)) if (v !== undefined) filtered[k] = v;
 
-        // Re-sync if status is delivered
-        if (courier.currentStatus === "delivered") {
-            await syncStatus(ctx, id, "delivered");
-        }
-
-        await ctx.db.insert("logs", {
-            courierId: id,
-            trackingId: courier.trackingId,
-            action: "updated",
-            description: "Courier details updated",
-            timestamp: Date.now(),
-        });
+        await ctx.db.patch(id, { ...filtered, updatedAt: Date.now() });
+        await ctx.db.insert("logs", { courierId: id, trackingId: courier.trackingId, action: "updated", description: "Courier details updated", timestamp: Date.now() });
     },
 });
 
-// Assign Courier
-export const assignCourier = mutation({
-    args: {
-        id: v.id("couriers"),
-        userId: v.id("users"),
-    },
+export const assignBranch = mutation({
+    args: { id: v.id("couriers"), branchId: v.id("branches") },
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
-        if (!courier) throw new Error("Courier not found");
-
-        const user = await ctx.db.get(args.userId);
-        if (!user) throw new Error("User not found");
-
-        await ctx.db.patch(args.id, {
-            assignedTo: args.userId,
-            currentStatus: "out_for_delivery",
-            updatedAt: Date.now(),
-        });
-
-        await ctx.db.insert("logs", {
-            courierId: args.id,
-            trackingId: courier.trackingId,
-            action: "assigned",
-            description: `Assigned to agent: ${user.name} (Status: Out for Delivery)`,
-            timestamp: Date.now(),
-        });
+        if (!courier) throw new Error("Not found");
+        await ctx.db.patch(args.id, { branchId: args.branchId, updatedAt: Date.now() });
+        await ctx.db.insert("logs", { courierId: args.id, trackingId: courier.trackingId, action: "assigned", description: "Assigned to branch hub", timestamp: Date.now() });
     },
 });
 
-// Complete Delivery (POD)
 export const completeDelivery = mutation({
     args: {
         id: v.id("couriers"),
@@ -542,205 +284,53 @@ export const completeDelivery = mutation({
         photoId: v.optional(v.string()),
         signeeName: v.string(),
         otpCode: v.string(),
-        latitude: v.optional(v.number()),
-        longitude: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
-        if (!courier) throw new Error("Courier not found");
-
-        // Robust OTP verification
-        if (courier.otpCode) {
-            const dbOtp = String(courier.otpCode).replace(/\D/g, '');
-            const inputOtp = String(args.otpCode).replace(/\D/g, '');
-            
-            if (dbOtp !== inputOtp) {
-                throw new Error(`Invalid OTP code. Please enter the correct 4-digit security code shown on the customer's tracking screen.`);
-            }
-        }
+        if (!courier) throw new Error("Not found");
+        if (courier.otpCode && courier.otpCode !== args.otpCode) throw new Error("Invalid OTP");
 
         const podId = await ctx.db.insert("proofOfDelivery", {
             courierId: args.id,
             signatureId: args.signatureId,
             photoId: args.photoId,
             signeeName: args.signeeName,
-            location: args.latitude && args.longitude ? {
-                latitude: args.latitude,
-                longitude: args.longitude,
-            } : undefined,
             timestamp: Date.now(),
         });
 
-        await ctx.db.patch(args.id, {
-            currentStatus: "delivered",
-            paymentStatus: "paid",
-            podId,
-            updatedAt: Date.now(),
-        });
-
-        if (courier.invoiceId) {
-            await ctx.db.patch(courier.invoiceId, {
-                status: "paid",
-            });
-        }
-
-        await ctx.db.insert("logs", {
-            courierId: args.id,
-            trackingId: courier.trackingId,
-            action: "status_changed",
-            description: `Delivery Completed (POD Captured). Signed by: ${args.signeeName}. Payment marked as PAID.`,
-            timestamp: Date.now(),
-        });
+        await ctx.db.patch(args.id, { currentStatus: "delivered", paymentStatus: "paid", podId, updatedAt: Date.now() });
     },
 });
 
-// Generate Invoice
-export const generateInvoice = mutation({
-    args: {
-        id: v.id("couriers"),
-    },
-    handler: async (ctx, args) => {
-        const courier = await ctx.db.get(args.id);
-        if (!courier) throw new Error("Courier not found");
-
-        const invoiceId = await ctx.db.insert("invoices", {
-            courierId: args.id,
-            invoiceNumber: generateInvoiceNumber(),
-            amount: courier.price || 0,
-            customerName: courier.senderName, // Billing to sender usually
-            customerAddress: courier.pickupAddress, // Billing address
-            status: (courier.paymentStatus === "paid" || courier.currentStatus === "delivered") ? "paid" : "unpaid",
-            generatedAt: Date.now(),
-        });
-
-        await ctx.db.patch(args.id, {
-            invoiceId,
-        });
-
-        return invoiceId;
-    },
-});
-
-// Update courier status
 export const updateStatus = mutation({
     args: {
         id: v.id("couriers"),
-        status: v.union(
-            v.literal("booked"),
-            v.literal("picked_up"),
-            v.literal("pending"),
-            v.literal("dispatched"),
-            v.literal("in_transit"),
-            v.literal("out_for_delivery"),
-            v.literal("delivered"),
-            v.literal("cancelled")
-        ),
+        status: v.union(v.literal("booked"), v.literal("picked_up"), v.literal("pending"), v.literal("dispatched"), v.literal("in_transit"), v.literal("out_for_delivery"), v.literal("delivered"), v.literal("cancelled")),
     },
     handler: async (ctx, args) => {
-        const courier = await ctx.db.get(args.id);
-        if (!courier) throw new Error("Courier not found");
-
-        const oldStatus = courier.currentStatus;
-
-        const updates: any = {
-            currentStatus: args.status,
-            updatedAt: Date.now(),
-        };
-
-        // If status is changed to delivered, mark payment as paid
-        if (args.status === "delivered") {
-            updates.paymentStatus = "paid";
-        }
-
-        await ctx.db.patch(args.id, updates);
-
-        // Sync status logic
-        await syncStatus(ctx, args.id, args.status);
-
-        const formatStatus = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
-
-        await ctx.db.insert("logs", {
-            courierId: args.id,
-            trackingId: courier.trackingId,
-            action: "status_changed",
-            description: args.status === "delivered" 
-                ? `Status changed: ${formatStatus(oldStatus)} → ${formatStatus(args.status)}. Payment marked as PAID.`
-                : `Status changed: ${formatStatus(oldStatus)} → ${formatStatus(args.status)}`,
-            timestamp: Date.now(),
-        });
+        if (args.status === "delivered") throw new Error("Use POD flow");
+        await ctx.db.patch(args.id, { currentStatus: args.status, updatedAt: Date.now() });
     },
 });
 
-
-// Cancel courier (only if booked)
 export const cancelCourier = mutation({
     args: { id: v.id("couriers") },
     handler: async (ctx, args) => {
-        const courier = await ctx.db.get(args.id);
-        if (!courier) throw new Error("Courier not found");
-
-        if (courier.currentStatus !== "booked") {
-            throw new Error("Only booked parcels can be cancelled");
-        }
-
-        await ctx.db.patch(args.id, {
-            currentStatus: "cancelled",
-            updatedAt: Date.now(),
-        });
-
-        await ctx.db.insert("logs", {
-            courierId: args.id,
-            trackingId: courier.trackingId,
-            action: "status_changed",
-            description: "Booking cancelled by user",
-            timestamp: Date.now(),
-        });
+        await ctx.db.patch(args.id, { currentStatus: "cancelled", updatedAt: Date.now() });
     },
 });
 
-// Mark courier as paid manually
 export const markAsPaid = mutation({
     args: { id: v.id("couriers") },
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
-        if (!courier) throw new Error("Courier not found");
-
-        await ctx.db.patch(args.id, {
-            paymentStatus: "paid",
-            updatedAt: Date.now(),
-        });
-
-        if (courier.invoiceId) {
-            await ctx.db.patch(courier.invoiceId, {
-                status: "paid",
-            });
-        }
-
-        await ctx.db.insert("logs", {
-            courierId: args.id,
-            trackingId: courier.trackingId,
-            action: "status_changed",
-            description: "Payment marked as PAID manually by admin",
-            timestamp: Date.now(),
-        });
+        await ctx.db.patch(args.id, { paymentStatus: "paid", updatedAt: Date.now() });
     },
 });
 
-// Delete courier
 export const remove = mutation({
     args: { id: v.id("couriers") },
     handler: async (ctx, args) => {
-        const courier = await ctx.db.get(args.id);
-        if (!courier) throw new Error("Courier not found");
-
         await ctx.db.delete(args.id);
-
-        await ctx.db.insert("logs", {
-            trackingId: courier.trackingId,
-            action: "deleted",
-            description: "Courier deleted",
-            timestamp: Date.now(),
-            courierId: args.id,
-        });
     },
 });

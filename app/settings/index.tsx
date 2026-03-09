@@ -6,11 +6,14 @@ import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
 import { FormInput } from '../../src/components';
-import { validateEmail, validateName, validatePhone, showAlert } from '../../src/utils/validation';
+import { validateName, validatePhone, showAlert } from '../../src/utils/validation';
+import { colors, spacing, globalStyles } from '../../src/styles/theme';
+import { useAuth } from '../../src/components/auth-context';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function SettingsScreen() {
     const router = useRouter();
-    const { user } = useAuth();
+    const { user, updateUser } = useAuth();
 
     // Safety check in case auth hasn't loaded 
     if (!user) {
@@ -31,7 +34,7 @@ export default function SettingsScreen() {
     });
     const [errors, setErrors] = useState<Record<string, string>>({});
 
-    // Keep form sync'd if user context updates from another socket push
+    // Keep form sync'd if user context updates
     useEffect(() => {
         setForm({
             name: user.name || '',
@@ -54,7 +57,7 @@ export default function SettingsScreen() {
             return false;
         }
 
-        const phoneValid = validatePhone(form.phone, true); // Phone is optional in settings
+        const phoneValid = validatePhone(form.phone, true);
         if (!phoneValid.isValid) {
             showAlert('Validation Error', phoneValid.message!);
             return false;
@@ -75,12 +78,22 @@ export default function SettingsScreen() {
 
         setIsSubmitting(true);
         try {
+            const updatedName = form.name.trim();
+            const updatedPhone = form.phone.trim() || undefined;
+
             await updateProfile({
                 id: user._id as Id<'users'>,
-                name: form.name.trim(),
-                phone: form.phone.trim() || undefined,
+                name: updatedName,
+                phone: updatedPhone,
                 password: (isAdmin && form.password) ? form.password : undefined,
             });
+
+            // Update local state and AsyncStorage for immediate real-time reflection across the app
+            await updateUser({
+                name: updatedName,
+                phone: updatedPhone,
+            });
+
             Alert.alert('Success', 'Profile updated successfully', [
                 { text: 'OK', onPress: () => router.back() },
             ]);
@@ -146,22 +159,19 @@ export default function SettingsScreen() {
                         <FormInput
                             label="Phone Number"
                             value={form.phone}
-                            onChangeText={(val) => updateField('phone', val)}
+                            onChangeText={(val) => {
+                                const numericValue = val.replace(/[^0-9]/g, '');
+                                if (numericValue.length <= 10) {
+                                    updateField('phone', numericValue);
+                                }
+                            }}
                             placeholder="10-digit phone number"
                             keyboardType="phone-pad"
                             error={errors.phone}
+                            maxLength={10}
                         />
 
-                        {isAdmin ? (
-                            <FormInput
-                                label="Update Password (Optional)"
-                                value={form.password}
-                                onChangeText={(val) => updateField('password', val)}
-                                placeholder="Enter new password"
-                                secureTextEntry
-                                error={errors.password}
-                            />
-                        ) : (
+                        {!isAdmin && (
                             <View style={styles.inputContainer}>
                                 <Text style={styles.inputLabel}>Your Password</Text>
                                 <View style={[styles.readOnlyInput, styles.lockedInput]}>
@@ -178,6 +188,17 @@ export default function SettingsScreen() {
                                 </View>
                                 <Text style={styles.helperText}>Only Admin can reset this password.</Text>
                             </View>
+                        )}
+
+                        {isAdmin && (
+                            <FormInput
+                                label="Update Password (Optional)"
+                                value={form.password}
+                                onChangeText={(val) => updateField('password', val)}
+                                placeholder="Enter new password"
+                                secureTextEntry
+                                error={errors.password}
+                            />
                         )}
 
                         <Pressable

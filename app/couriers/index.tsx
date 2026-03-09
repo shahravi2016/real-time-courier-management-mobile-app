@@ -23,6 +23,7 @@ type CourierStatus =
 
 const statusFilters: { label: string; value: string }[] = [
     { label: 'All', value: 'all' },
+    { label: 'Unassigned', value: 'unassigned' },
     { label: 'Booked', value: 'booked' },
     { label: 'Picked Up', value: 'picked_up' },
     { label: 'Dispatched', value: 'dispatched' },
@@ -40,8 +41,10 @@ const customerFilters: { label: string; value: string }[] = [
 
 export default function CourierListScreen() {
     const router = useRouter();
+    const params = useLocalSearchParams();
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedFilter, setSelectedFilter] = useState<string>('all');
+    const [selectedFilter, setSelectedFilter] = useState<string>(params.filter === 'needs_attention' ? 'unassigned' : 'all');
+    const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
 
     const { user, isLoading: authLoading } = useAuth();
 
@@ -55,9 +58,22 @@ export default function CourierListScreen() {
     const isAdmin = user?.role === 'admin';
     const isBranchManager = user?.role === 'branch_manager';
 
-    const allCouriers = useQuery(api.couriers.list);
+    // Fetch branches for admin filtering
+    const branches = useQuery(api.branches.list, isAdmin ? {} : "skip");
+
+    const isUnassignedSelected = selectedFilter === 'unassigned';
+
+    const allCouriers = useQuery(api.couriers.list, 
+        isAdmin ? { 
+            branchId: (selectedBranch as any) || undefined,
+            unassignedOnly: isUnassignedSelected
+        } : "skip"
+    );
     const branchCouriers = useQuery(api.couriers.list, 
-        (isBranchManager && user?.branchId) ? { branchId: user.branchId as any } : "skip"
+        (isBranchManager && user?.branchId) ? { 
+            branchId: user.branchId as any,
+            unassignedOnly: isUnassignedSelected
+        } : "skip"
     );
     const myCouriers = useQuery(api.couriers.getMyCouriers,
         (user?._id && (user.role === 'agent' || user.role === 'customer')) ? { userId: user._id, role: user.role as any } : "skip" as any
@@ -70,8 +86,8 @@ export default function CourierListScreen() {
 
         let result = couriers;
 
-        // Apply status filter
-        if (selectedFilter !== 'all') {
+        // Apply UI-side status filter (except unassigned which is handled server-side)
+        if (selectedFilter !== 'all' && selectedFilter !== 'unassigned') {
             if (selectedFilter === 'active') {
                 result = result.filter((c) => !['delivered', 'cancelled'].includes(c.currentStatus));
             } else if (selectedFilter === 'completed') {
@@ -195,6 +211,38 @@ export default function CourierListScreen() {
                     placeholderTextColor={colors.textMuted}
                 />
 
+                {/* Admin-only Branch Filter */}
+                {isAdmin && branches && (
+                    <View style={styles.branchFilterWrapper}>
+                        <Text style={styles.filterLabel}>Filter by Branch:</Text>
+                        <FlatList
+                            horizontal
+                            data={[{ _id: 'all', name: 'All Branches' }, ...branches]}
+                            keyExtractor={(item) => item._id}
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.filterContent}
+                            renderItem={({ item }) => (
+                                <Pressable
+                                    onPress={() => setSelectedBranch(item._id === 'all' ? null : item._id)}
+                                    style={[
+                                        styles.branchChip,
+                                        (item._id === 'all' ? selectedBranch === null : selectedBranch === item._id) && styles.branchChipActive,
+                                    ]}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.branchChipText,
+                                            (item._id === 'all' ? selectedBranch === null : selectedBranch === item._id) && styles.branchChipTextActive,
+                                        ]}
+                                    >
+                                        {item.name}
+                                    </Text>
+                                </Pressable>
+                            )}
+                        />
+                    </View>
+                )}
+
                 {/* Status Filter */}
                 <View style={styles.filterWrapper}>
                     <FlatList
@@ -288,6 +336,38 @@ const styles = StyleSheet.create({
         fontSize: fontSize.md,
         color: colors.text,
         marginTop: spacing.sm,
+    },
+    branchFilterWrapper: {
+        marginTop: spacing.md,
+    },
+    filterLabel: {
+        fontSize: 12,
+        color: colors.textSecondary,
+        marginBottom: 8,
+        marginLeft: 4,
+        fontWeight: '600',
+        textTransform: 'uppercase',
+    },
+    branchChip: {
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+        backgroundColor: colors.surface,
+        borderWidth: 1,
+        borderColor: colors.border,
+        marginRight: spacing.sm,
+    },
+    branchChipActive: {
+        backgroundColor: colors.primary + '20',
+        borderColor: colors.primary,
+    },
+    branchChipText: {
+        fontSize: 12,
+        color: colors.textSecondary,
+    },
+    branchChipTextActive: {
+        color: colors.primary,
+        fontWeight: 'bold',
     },
     filterWrapper: {
         height: 44,

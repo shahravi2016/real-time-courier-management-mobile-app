@@ -545,6 +545,14 @@ export default function DashboardScreen() {
                                     icon="wallet-outline"
                                     color="#3498DB"
                                 />
+                                <View style={{ width: spacing.sm }} />
+                                <StatCard
+                                    label="Needs Attention"
+                                    value={stats.needsAttention || 0}
+                                    icon="alert-circle-outline"
+                                    color={colors.error}
+                                    onPress={() => router.push({ pathname: '/couriers', params: { unassigned: 'true' } })}
+                                />
                             </View>
                         </>
                     ) : (

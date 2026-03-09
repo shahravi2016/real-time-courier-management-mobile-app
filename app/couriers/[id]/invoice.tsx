@@ -18,7 +18,10 @@ export default function InvoiceScreen() {
     const router = useRouter();
     const { user } = useAuth();
     const isAdmin = user?.role === 'admin';
-    const courier = useQuery(api.couriers.getById, { id: id as Id<'couriers'> });
+    const courier = useQuery(api.couriers.getById, { 
+        id: id as Id<'couriers'>,
+        userId: user?._id as string
+    });
     const markAsPaid = useMutation(api.couriers.markAsPaid);
     const [isUpdating, setIsUpdating] = useState(false);
 

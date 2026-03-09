@@ -9,7 +9,6 @@ import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme'
 import { Ionicons } from '@expo/vector-icons';
 import { Id } from '../../convex/_generated/dataModel';
 import { validateName, validatePhone, showAlert } from '../../src/utils/validation';
-
 import { useAuth } from '../../src/components/auth-context';
 
 const PAYMENT_METHODS = ['cash', 'card', 'prepaid'] as const;
@@ -18,6 +17,7 @@ export default function AddCourierScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
     const { user } = useAuth();
+    
     const isCustomer = user?.role === 'customer';
     const isAdmin = user?.role === 'admin';
     const isBranchManager = user?.role === 'branch_manager';
@@ -37,34 +37,10 @@ export default function AddCourierScreen() {
         notes: '',
         weight: '',
         distance: '',
-        expectedDeliveryDate: '',
         paymentMethod: 'cash' as 'cash' | 'card' | 'prepaid',
         deliveryType: 'normal' as 'normal' | 'express',
         branchId: '' as string,
     });
-
-    // Pre-fill form from user data OR rebook params
-    React.useEffect(() => {
-        if (params.rebook === 'true') {
-            setForm(prev => ({
-                ...prev,
-                senderName: (params.senderName as string) || user?.name || '',
-                senderPhone: (params.senderPhone as string) || user?.phone || '',
-                receiverName: (params.receiverName as string) || '',
-                receiverPhone: (params.receiverPhone as string) || '',
-                pickupAddress: (params.pickupAddress as string) || '',
-                deliveryAddress: (params.deliveryAddress as string) || '',
-                weight: isStaff ? (params.weight as string || '') : '',
-                distance: isStaff ? (params.distance as string || '') : '',
-            }));
-        } else if (isCustomer && user) {
-            setForm(prev => ({
-                ...prev,
-                senderName: user.name || '',
-                senderPhone: user.phone || '',
-            }));
-        }
-    }, [isCustomer, user?.name, user?.phone, params.rebook, isStaff]);
 
     const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -76,78 +52,34 @@ export default function AddCourierScreen() {
     };
 
     const calculatedPrice = (() => {
-        if (!isStaff) return null; // Customers don't see/set price during booking
+        // Pricing Engine Sync: Base 50 + Weight*10 + Distance*5
         const w = parseFloat(form.weight) || 0;
         const d = parseFloat(form.distance) || 0;
-        if (w === 0 && d === 0) return null;
-        const basePrice = w * 5 + d * 2 + 10;
-        return form.deliveryType === 'express' ? basePrice * 1.5 : basePrice;
+        let price = 50; // Base rate
+        if (w > 0) price += w * 10;
+        if (d > 0) price += d * 5;
+        return form.deliveryType === 'express' ? Math.round(price * 1.5) : Math.round(price);
     })();
 
     const validate = () => {
-        // Authentication/Identity Check
         if (!user) {
-            showAlert('Auth Error', 'You must be logged in to book a courier.');
+            showAlert('Auth Error', 'You must be logged in to book.');
             return false;
         }
 
-        const nameValid = validateName(form.senderName, 'Sender Name');
-        if (!nameValid.isValid) {
-            showAlert('Validation Error', nameValid.message!);
+        if (!form.receiverName.trim() || !form.receiverPhone.trim()) {
+            showAlert('Validation Error', 'Receiver details are mandatory.');
             return false;
         }
 
-        const sPhoneValid = validatePhone(form.senderPhone);
-        if (!sPhoneValid.isValid) {
-            showAlert('Validation Error', sPhoneValid.message!);
+        if (!form.pickupAddress.trim() || !form.deliveryAddress.trim()) {
+            showAlert('Validation Error', 'Addresses are mandatory.');
             return false;
         }
 
-        const rNameValid = validateName(form.receiverName, 'Receiver Name');
-        if (!rNameValid.isValid) {
-            showAlert('Validation Error', rNameValid.message!);
+        if (!form.branchId) {
+            showAlert('Hub Required', 'Please select your nearest branch hub for drop-off/pickup.');
             return false;
-        }
-
-        const rPhoneValid = validatePhone(form.receiverPhone);
-        if (!rPhoneValid.isValid) {
-            showAlert('Validation Error', rPhoneValid.message!);
-            return false;
-        }
-
-        if (!form.pickupAddress.trim()) {
-            showAlert('Validation Error', 'Pickup address is required');
-            return false;
-        }
-        if (!form.deliveryAddress.trim()) {
-            showAlert('Validation Error', 'Delivery address is required');
-            return false;
-        }
-
-        // Staff-only fields validation
-        if (isStaff) {
-            const w = parseFloat(form.weight);
-            if (isNaN(w) || w <= 0) {
-                showAlert('Validation Error', 'Valid weight required for staff booking');
-                return false;
-            } else if (w > 500) {
-                showAlert('Validation Error', 'Weight cannot exceed 500kg');
-                return false;
-            }
-
-            const d = parseFloat(form.distance);
-            if (isNaN(d) || d <= 0) {
-                showAlert('Validation Error', 'Valid distance required for staff booking');
-                return false;
-            } else if (d > 2000) {
-                showAlert('Validation Error', 'Distance cannot exceed 2000km');
-                return false;
-            }
-
-            if (!form.branchId) {
-                showAlert('Validation Error', 'Staff must assign a branch hub');
-                return false;
-            }
         }
 
         return true;
@@ -158,10 +90,7 @@ export default function AddCourierScreen() {
 
         setIsSubmitting(true);
         try {
-            const w = parseFloat(form.weight) || undefined;
-            const d = parseFloat(form.distance) || undefined;
-
-            const courierId = await createCourier({
+            await createCourier({
                 senderName: form.senderName.trim(),
                 senderPhone: form.senderPhone.trim(),
                 receiverName: form.receiverName.trim(),
@@ -169,219 +98,151 @@ export default function AddCourierScreen() {
                 pickupAddress: form.pickupAddress.trim(),
                 deliveryAddress: form.deliveryAddress.trim(),
                 notes: form.notes.trim() || undefined,
-                weight: w,
-                distance: d,
-                price: calculatedPrice || undefined,
-                paymentMethod: form.paymentMethod,
+                weight: parseFloat(form.weight) || undefined,
+                distance: parseFloat(form.distance) || undefined,
+                branchId: form.branchId as Id<'branches'>,
                 deliveryType: form.deliveryType,
-                expectedDeliveryDate: form.expectedDeliveryDate.trim() || undefined,
-                branchId: form.branchId ? (form.branchId as Id<'branches'>) : undefined,
+                paymentMethod: form.paymentMethod,
                 bookedBy: user?._id as Id<'users'>,
             });
 
-            // Mock Notification
-            const { triggerMockNotification } = require('../../src/utils/notifications');
-            triggerMockNotification(
-                'SMS',
-                form.receiverPhone,
-                `Shipment Alert! A new courier with Tracking ID ${courierId} has been created. Track it in Courier Manager app.`
-            );
-
-            Alert.alert('Success', 'Courier booked successfully', [
-                { text: 'OK', onPress: () => router.replace('/couriers') },
+            Alert.alert('Success', 'Courier booked successfully!', [
+                { text: 'View My Parcels', onPress: () => router.replace('/couriers') }
             ]);
         } catch (error: any) {
-            Alert.alert('Booking Error', error.message || 'Failed to create courier.');
+            Alert.alert('Error', error.message || 'Failed to create booking.');
         } finally {
             setIsSubmitting(false);
         }
     };
 
-    if (isSubmitting) {
-        return (
-            <SafeAreaView style={globalStyles.safeArea}>
-                <Stack.Screen options={{ title: 'Add Courier' }} />
-                <LoadingState message="Processing shipment..." />
-            </SafeAreaView>
-        );
-    }
+    if (isSubmitting) return <LoadingState message="Processing booking..." />;
 
     return (
         <SafeAreaView style={globalStyles.safeArea}>
             <Stack.Screen options={{ headerShown: false }} />
-
+            
             <View style={styles.header}>
-                <Pressable
-                    onPress={() => router.canGoBack() ? router.back() : router.replace('/')}
-                    style={styles.backButtonContainer}
-                >
+                <Pressable onPress={() => router.back()} style={styles.backButton}>
                     <Ionicons name="arrow-back" size={24} color={colors.text} />
                 </Pressable>
-                <Text style={styles.headerTitle}>New Courier</Text>
-                <View style={{ width: 44 }} />
+                <Text style={styles.headerTitle}>New Shipment</Text>
+                <View style={{ width: 40 }} />
             </View>
 
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={{ flex: 1 }}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-            >
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
                 <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-                    <Text style={styles.sectionLabel}>Shipment Details</Text>
-
-                    <FormInput
-                        label="Sender Name"
-                        value={form.senderName}
-                        onChangeText={(v) => updateField('senderName', v)}
-                        placeholder="Enter sender name"
-                        error={errors.senderName}
-                    />
-
-                    <FormInput
-                        label="Sender Phone"
-                        value={form.senderPhone}
-                        onChangeText={(v) => updateField('senderPhone', v)}
-                        placeholder="10-digit sender phone"
-                        keyboardType="phone-pad"
-                        error={errors.senderPhone}
-                        maxLength={10}
-                    />
-
+                    
+                    <Text style={styles.sectionTitle}>Sender & Receiver</Text>
                     <FormInput
                         label="Receiver Name"
                         value={form.receiverName}
                         onChangeText={(v) => updateField('receiverName', v)}
-                        placeholder="Enter receiver name"
-                        error={errors.receiverName}
+                        placeholder="Full name of recipient"
                     />
-
                     <FormInput
                         label="Receiver Phone"
                         value={form.receiverPhone}
-                        onChangeText={(v) => updateField('receiverPhone', v)}
-                        placeholder="10-digit phone number"
+                        onChangeText={(v) => updateField('receiverPhone', v.replace(/[^0-9]/g, ''))}
+                        placeholder="10-digit mobile number"
                         keyboardType="phone-pad"
-                        error={errors.receiverPhone}
                         maxLength={10}
                     />
 
-                    <FormInput
-                        label="Pickup Address"
-                        value={form.pickupAddress}
-                        onChangeText={(v) => updateField('pickupAddress', v)}
-                        placeholder="Street, City, Zip"
-                        multiline
-                        error={errors.pickupAddress}
-                    />
-
-                    <FormInput
-                        label="Delivery Address"
-                        value={form.deliveryAddress}
-                        onChangeText={(v) => updateField('deliveryAddress', v)}
-                        placeholder="Destination address"
-                        multiline
-                        error={errors.deliveryAddress}
-                    />
-
-                    <FormInput
-                        label="Notes (Optional)"
-                        value={form.notes}
-                        onChangeText={(v) => updateField('notes', v)}
-                        placeholder="Handle with care, etc."
-                        multiline
-                    />
-
-                    {/* Restricted Fields: Only for Admins/Managers */}
-                    <Text style={[styles.sectionLabel, !isStaff && { opacity: 0.5 }]}>
-                        Billing & Logistics { !isStaff && '(Staff Only)'}
-                    </Text>
-
-                    <View style={[globalStyles.row, !isStaff && { opacity: 0.5 }]}>
-                        <View style={{ flex: 1 }}>
-                            <FormInput
-                                label="Weight (kg)"
-                                value={form.weight}
-                                onChangeText={(v) => updateField('weight', v)}
-                                placeholder="0.0"
-                                keyboardType="numeric"
-                                editable={isStaff}
-                                error={errors.weight}
-                            />
-                        </View>
-                        <View style={{ width: spacing.md }} />
-                        <View style={{ flex: 1 }}>
-                            <FormInput
-                                label="Distance (km)"
-                                value={form.distance}
-                                onChangeText={(v) => updateField('distance', v)}
-                                placeholder="0.0"
-                                keyboardType="numeric"
-                                editable={isStaff}
-                                error={errors.distance}
-                            />
-                        </View>
-                    </View>
-
-                    <Text style={[styles.fieldLabel, !isStaff && { opacity: 0.5 }]}>Payment Method</Text>
-                    <View style={[styles.paymentRow, !isStaff && { opacity: 0.5 }]}>
-                        {PAYMENT_METHODS.map((method) => (
+                    <Text style={styles.sectionTitle}>Logistics Hub</Text>
+                    <Text style={styles.helperText}>Select the nearest branch for this shipment:</Text>
+                    <View style={styles.branchGrid}>
+                        {branches?.map((branch) => (
                             <Pressable
-                                key={method}
-                                disabled={!isStaff}
-                                style={[
-                                    styles.paymentChip,
-                                    form.paymentMethod === method && styles.paymentChipActive
-                                ]}
-                                onPress={() => setForm(prev => ({ ...prev, paymentMethod: method }))}
+                                key={branch._id}
+                                style={[styles.branchChip, form.branchId === branch._id && styles.branchChipActive]}
+                                onPress={() => updateField('branchId', branch._id)}
                             >
-                                <Ionicons
-                                    name={method === 'cash' ? 'cash-outline' : method === 'card' ? 'card-outline' : 'wallet-outline'}
-                                    size={16}
-                                    color={form.paymentMethod === method ? '#fff' : colors.textSecondary}
+                                <Ionicons 
+                                    name="business-outline" 
+                                    size={14} 
+                                    color={form.branchId === branch._id ? '#fff' : colors.textSecondary} 
                                 />
-                                <Text style={[styles.paymentChipText, form.paymentMethod === method && styles.paymentChipTextActive]}>
-                                    {method.toUpperCase()}
+                                <Text style={[styles.branchChipText, form.branchId === branch._id && { color: '#fff' }]}>
+                                    {branch.name}
                                 </Text>
                             </Pressable>
                         ))}
                     </View>
 
-                    {isStaff && (
-                        <>
-                            <Text style={styles.sectionLabel}>Branch Assignment</Text>
-                            <View style={styles.branchGrid}>
-                                {branches?.map((branch) => (
-                                    <Pressable
-                                        key={branch._id}
-                                        style={[styles.branchChip, form.branchId === branch._id && styles.branchChipActive]}
-                                        onPress={() => updateField('branchId', branch._id)}
-                                    >
-                                        <Text style={[styles.branchChipText, form.branchId === branch._id && { color: '#fff' }]}>
-                                            {branch.name}
-                                        </Text>
-                                    </Pressable>
-                                ))}
-                            </View>
-                            {errors.branch && <Text style={styles.errorText}>{errors.branch}</Text>}
-                        </>
-                    )}
+                    <Text style={styles.sectionTitle}>Addresses</Text>
+                    <FormInput
+                        label="Pickup Address"
+                        value={form.pickupAddress}
+                        onChangeText={(v) => updateField('pickupAddress', v)}
+                        placeholder="Where should we pick up?"
+                        multiline
+                    />
+                    <FormInput
+                        label="Delivery Address"
+                        value={form.deliveryAddress}
+                        onChangeText={(v) => updateField('deliveryAddress', v)}
+                        placeholder="Final destination"
+                        multiline
+                    />
 
-                    {calculatedPrice !== null && isStaff && (
-                        <View style={styles.pricePreview}>
-                            <Text style={styles.priceLabel}>Estimated Price</Text>
-                            <Text style={styles.priceValue}>₹{calculatedPrice.toFixed(2)}</Text>
+                    <Text style={styles.sectionTitle}>Service Level</Text>
+                    <View style={styles.deliveryTypeRow}>
+                        <Pressable 
+                            style={[styles.typeCard, form.deliveryType === 'normal' && styles.typeCardActive]}
+                            onPress={() => updateField('deliveryType', 'normal')}
+                        >
+                            <Ionicons name="bicycle-outline" size={24} color={form.deliveryType === 'normal' ? colors.primary : colors.textMuted} />
+                            <Text style={[styles.typeText, form.deliveryType === 'normal' && styles.typeTextActive]}>Normal</Text>
+                            <Text style={styles.typeDesc}>3-5 Days</Text>
+                        </Pressable>
+                        <Pressable 
+                            style={[styles.typeCard, form.deliveryType === 'express' && styles.typeCardExpress]}
+                            onPress={() => updateField('deliveryType', 'express')}
+                        >
+                            <Ionicons name="flash-outline" size={24} color={form.deliveryType === 'express' ? '#fff' : colors.textMuted} />
+                            <Text style={[styles.typeText, form.deliveryType === 'express' && { color: '#fff' }]}>Express</Text>
+                            <Text style={[styles.typeDesc, form.deliveryType === 'express' && { color: 'rgba(255,255,255,0.8)' }]}>1-2 Days</Text>
+                        </Pressable>
+                    </View>
+
+                    {isStaff && (
+                        <View style={styles.staffSection}>
+                            <Text style={styles.staffTitle}>Staff Verification Only</Text>
+                            <View style={globalStyles.row}>
+                                <View style={{ flex: 1 }}>
+                                    <FormInput
+                                        label="Weight (kg)"
+                                        value={form.weight}
+                                        onChangeText={(v) => updateField('weight', v)}
+                                        keyboardType="numeric"
+                                    />
+                                </View>
+                                <View style={{ width: spacing.md }} />
+                                <View style={{ flex: 1 }}>
+                                    <FormInput
+                                        label="Distance (km)"
+                                        value={form.distance}
+                                        onChangeText={(v) => updateField('distance', v)}
+                                        keyboardType="numeric"
+                                    />
+                                </View>
+                            </View>
                         </View>
                     )}
 
-                    <Pressable
-                        style={({ pressed }) => [styles.submitButton, pressed && styles.buttonPressed]}
-                        onPress={handleSubmit}
-                    >
-                        <Ionicons name="checkmark-circle-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={globalStyles.buttonText}>{isStaff ? 'Register Courier' : 'Request Booking'}</Text>
-                    </Pressable>
+                    <View style={styles.priceContainer}>
+                        <View>
+                            <Text style={styles.priceLabel}>Estimated Total</Text>
+                            <Text style={styles.priceValue}>₹{calculatedPrice.toFixed(2)}</Text>
+                        </View>
+                        <Pressable style={styles.submitButton} onPress={handleSubmit}>
+                            <Text style={styles.submitButtonText}>{isCustomer ? 'Book Now' : 'Create'}</Text>
+                            <Ionicons name="arrow-forward" size={18} color="#fff" />
+                        </Pressable>
+                    </View>
 
-                    <View style={{ height: spacing.xxl }} />
+                    <View style={{ height: 40 }} />
                 </ScrollView>
             </KeyboardAvoidingView>
         </SafeAreaView>
@@ -389,146 +250,27 @@ export default function AddCourierScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        paddingHorizontal: spacing.md,
-        paddingTop: spacing.md,
-    },
-    sectionLabel: {
-        fontSize: fontSize.xs,
-        fontWeight: 'bold',
-        color: colors.primary,
-        textTransform: 'uppercase',
-        letterSpacing: 1.5,
-        marginBottom: spacing.md,
-        marginTop: spacing.md,
-    },
-    fieldLabel: {
-        fontSize: 12,
-        color: colors.textSecondary,
-        marginBottom: 8,
-        fontWeight: '600',
-    },
-    paymentRow: {
-        flexDirection: 'row',
-        gap: spacing.sm,
-        marginBottom: spacing.lg,
-    },
-    paymentChip: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 12,
-        borderRadius: 12,
-        backgroundColor: colors.surface,
-        borderWidth: 1,
-        borderColor: colors.border,
-        gap: 6,
-    },
-    paymentChipActive: {
-        backgroundColor: colors.primary,
-        borderColor: colors.primary,
-    },
-    paymentChipText: {
-        fontSize: 10,
-        color: colors.textSecondary,
-        fontWeight: 'bold',
-    },
-    paymentChipTextActive: {
-        color: '#fff',
-    },
-    pricePreview: {
-        backgroundColor: colors.success + '15',
-        borderWidth: 1,
-        borderColor: colors.success + '30',
-        borderRadius: 16,
-        padding: spacing.lg,
-        marginBottom: spacing.xl,
-        alignItems: 'center',
-    },
-    priceLabel: {
-        fontSize: 10,
-        color: colors.success,
-        fontWeight: 'bold',
-        textTransform: 'uppercase',
-    },
-    priceValue: {
-        fontSize: 28,
-        fontWeight: '900',
-        color: colors.success,
-        marginTop: 4,
-    },
-    branchGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: spacing.sm,
-        marginBottom: spacing.md,
-    },
-    branchChip: {
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 20,
-        backgroundColor: colors.surface,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    branchChipActive: {
-        backgroundColor: colors.primary,
-        borderColor: colors.primary,
-    },
-    branchChipText: {
-        fontSize: 12,
-        color: colors.textSecondary,
-        fontWeight: '600',
-    },
-    submitButton: {
-        backgroundColor: colors.primary,
-        paddingVertical: 16,
-        borderRadius: 16,
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexDirection: 'row',
-        marginTop: spacing.md,
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 5,
-    },
-    buttonPressed: {
-        opacity: 0.9,
-        transform: [{ scale: 0.98 }],
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.md,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    backButtonContainer: {
-        width: 44,
-        height: 44,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: colors.surface,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    headerTitle: {
-        fontSize: fontSize.md,
-        fontWeight: 'bold',
-        color: colors.text,
-    },
-    errorText: {
-        fontSize: 10,
-        color: colors.error,
-        marginTop: -spacing.sm,
-        marginBottom: spacing.md,
-        fontWeight: 'bold',
-    },
+    container: { flex: 1, padding: spacing.lg },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
+    headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.text },
+    backButton: { padding: spacing.sm },
+    sectionTitle: { fontSize: 14, fontWeight: '700', color: colors.primary, textTransform: 'uppercase', marginTop: spacing.xl, marginBottom: spacing.md, letterSpacing: 1 },
+    helperText: { fontSize: 12, color: colors.textSecondary, marginBottom: spacing.sm },
+    branchGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.md },
+    branchChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+    branchChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    branchChipText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+    deliveryTypeRow: { flexDirection: 'row', gap: spacing.md },
+    typeCard: { flex: 1, padding: spacing.md, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
+    typeCardActive: { borderColor: colors.primary, backgroundColor: colors.primary + '10' },
+    typeCardExpress: { backgroundColor: colors.warning, borderColor: colors.warning },
+    typeText: { fontSize: 14, fontWeight: 'bold', marginTop: 4, color: colors.text },
+    typeDesc: { fontSize: 10, color: colors.textMuted },
+    staffSection: { marginTop: spacing.xl, padding: spacing.md, backgroundColor: colors.surfaceElevated, borderRadius: 12, borderStyle: 'dashed', borderWidth: 1, borderColor: colors.border },
+    staffTitle: { fontSize: 10, fontWeight: 'bold', color: colors.error, marginBottom: spacing.sm, textTransform: 'uppercase' },
+    priceContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.xxl, padding: spacing.lg, backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border },
+    priceLabel: { fontSize: 12, color: colors.textSecondary },
+    priceValue: { fontSize: 24, fontWeight: '900', color: colors.text },
+    submitButton: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.primary, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 12 },
+    submitButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 }
 });

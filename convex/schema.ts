@@ -47,7 +47,10 @@ export default defineSchema({
         .index("by_status", ["currentStatus"])
         .index("by_createdAt", ["createdAt"])
         .index("by_assignedTo", ["assignedTo"])
-        .index("by_branchId", ["branchId"]),
+        .index("by_branchId", ["branchId"])
+        .index("by_senderPhone", ["senderPhone"])
+        .index("by_receiverPhone", ["receiverPhone"])
+        .index("by_senderName", ["senderName"]),
 
     branches: defineTable({
         name: v.string(),

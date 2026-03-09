@@ -16,6 +16,7 @@ interface AuthContextType {
     isLoading: boolean;
     login: (user: User) => Promise<void>;
     logout: () => Promise<void>;
+    updateUser: (updates: Partial<User>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -23,6 +24,7 @@ const AuthContext = createContext<AuthContextType>({
     isLoading: true,
     login: async () => { },
     logout: async () => { },
+    updateUser: async () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -37,11 +39,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         const loadSession = async () => {
             try {
-                // FORCE LOGOUT ON EVERY APP STARTUP AS PER REQUEST
-                await AsyncStorage.removeItem(SESSION_KEY);
-                setUser(null);
+                const storedUser = await AsyncStorage.getItem(SESSION_KEY);
+                if (storedUser) {
+                    setUser(JSON.parse(storedUser));
+                }
             } catch (e) {
-                console.error('Failed to clear session:', e);
+                console.error('Failed to load session:', e);
             } finally {
                 setIsLoading(false);
             }
@@ -59,8 +62,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
     }, []);
 
+    const updateUser = useCallback(async (updates: Partial<User>) => {
+        setUser(prev => {
+            if (!prev) return null;
+            const updated = { ...prev, ...updates };
+            AsyncStorage.setItem(SESSION_KEY, JSON.stringify(updated));
+            return updated;
+        });
+    }, []);
+
     return (
-        <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+        <AuthContext.Provider value={{ user, isLoading, login, logout, updateUser }}>
             {children}
         </AuthContext.Provider>
     );

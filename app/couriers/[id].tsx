@@ -30,7 +30,6 @@ const statusOptions: { label: string; value: CourierStatus }[] = [
     { label: 'Arrived at Hub', value: 'dispatched' },
     { label: 'In Transit', value: 'in_transit' },
     { label: 'Out for Delivery', value: 'out_for_delivery' },
-    { label: 'Delivered (Marks as Paid)', value: 'delivered' },
     { label: 'Cancelled', value: 'cancelled' },
 ];
 
@@ -39,7 +38,10 @@ export default function CourierDetailsScreen() {
     const router = useRouter();
     const { user } = useAuth();
 
-    const courier = useQuery(api.couriers.getById, { id: id as Id<'couriers'> });
+    const courier = useQuery(api.couriers.getById, { 
+        id: id as Id<'couriers'>,
+        userId: user?._id as string
+    });
     const agents = useQuery(api.users.listAgents);
     const branches = useQuery(api.branches.list);
     const isAdmin = user?.role === 'admin';
