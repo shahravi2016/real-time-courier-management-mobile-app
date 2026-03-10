@@ -98,6 +98,7 @@ export default function CourierDetailsScreen() {
                 notes: editForm.notes,
                 weight: parseFloat(editForm.weight) || 0,
                 deliveryType: editForm.deliveryType,
+                userId: user?._id as Id<'users'>
             });
             setShowEditModal(false);
             Alert.alert('Success', 'Courier details updated.');
@@ -714,7 +715,14 @@ const styles = StyleSheet.create({
     podVisuals: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
     podImageContainer: { flex: 1 },
     tinyLabel: { fontSize: 10, color: colors.textMuted, marginBottom: 4 },
-    podPreview: { width: '100%', height: 100, borderRadius: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+    podPreview: { 
+        width: '100%', 
+        height: 180, // Increased from 100 for better visibility
+        borderRadius: 8, 
+        backgroundColor: '#FFFFFF', // FORCED WHITE for signature visibility
+        borderWidth: 1, 
+        borderColor: colors.border 
+    },
     agentActions: { padding: spacing.md },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
     modalContent: { backgroundColor: colors.background, padding: spacing.xl, borderTopLeftRadius: 32, borderTopRightRadius: 32, maxHeight: '90%' },

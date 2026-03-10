@@ -95,35 +95,15 @@ export default function CourierListScreen() {
             newSelected.add(id);
         }
         setSelectedIds(newSelected);
-        if (newSelected.size === 0 && isSelectionMode) {
-            // Keep selection mode active if user explicitly entered it
-        }
     };
 
-    const handleBulkDelete = () => {
-        if (selectedIds.size === 0) return;
-
-        Alert.alert(
-            "Bulk Delete",
-            `Are you sure you want to delete ${selectedIds.size} selected items? Advanced parcels will be blocked automatically.`,
-            [
-                { text: "Cancel", style: "cancel" },
-                { 
-                    text: "Delete All", 
-                    style: "destructive", 
-                    onPress: async () => {
-                        try {
-                            await removeMultiple({ ids: Array.from(selectedIds) });
-                            setSelectedIds(new Set());
-                            setIsSelectionMode(false);
-                            Alert.alert("Success", "Selected items deleted.");
-                        } catch (e: any) {
-                            Alert.alert("Integrity Error", e.message);
-                        }
-                    }
-                }
-            ]
-        );
+    const handleSelectAll = () => {
+        if (selectedIds.size === filteredCouriers.length) {
+            setSelectedIds(new Set());
+        } else {
+            const allIds = new Set(filteredCouriers.map(c => c._id));
+            setSelectedIds(allIds);
+        }
     };
 
     const filteredCouriers = useMemo(() => {
@@ -155,6 +135,41 @@ export default function CourierListScreen() {
 
         return result;
     }, [couriers, searchTerm, selectedFilter]);
+
+    const hasAdvancedSelected = useMemo(() => {
+        if (!filteredCouriers) return false;
+        const advancedStatuses = ["picked_up", "dispatched", "in_transit", "out_for_delivery", "delivered"];
+        return Array.from(selectedIds).some(id => {
+            const courier = filteredCouriers.find(c => c._id === id);
+            return courier && advancedStatuses.includes(courier.currentStatus);
+        });
+    }, [selectedIds, filteredCouriers]);
+
+    const handleBulkDelete = () => {
+        if (selectedIds.size === 0) return;
+
+        Alert.alert(
+            "Bulk Delete",
+            `Are you sure you want to delete ${selectedIds.size} selected items? Advanced parcels will be blocked automatically.`,
+            [
+                { text: "Cancel", style: "cancel" },
+                { 
+                    text: "Delete All", 
+                    style: "destructive", 
+                    onPress: async () => {
+                        try {
+                            await removeMultiple({ ids: Array.from(selectedIds) });
+                            setSelectedIds(new Set());
+                            setIsSelectionMode(false);
+                            Alert.alert("Success", "Selected items deleted.");
+                        } catch (e: any) {
+                            Alert.alert("Integrity Error", e.message);
+                        }
+                    }
+                }
+            ]
+        );
+    };
 
     const sanitizeCsv = (val: string) => `"${(val || '').replace(/"/g, '""')}"`;
 
@@ -259,9 +274,23 @@ export default function CourierListScreen() {
                         </>
                     )}
                     {isSelectionMode && (
-                        <Pressable onPress={handleBulkDelete} disabled={selectedIds.size === 0}>
-                            <Ionicons name="trash" size={24} color={selectedIds.size > 0 ? colors.error : colors.textMuted} />
-                        </Pressable>
+                        <View style={globalStyles.row}>
+                            <Pressable onPress={handleSelectAll} style={{ marginRight: spacing.lg }}>
+                                <Text style={styles.headerButton}>
+                                    {selectedIds.size === filteredCouriers.length ? 'None' : 'All'}
+                                </Text>
+                            </Pressable>
+                            <Pressable 
+                                onPress={handleBulkDelete} 
+                                disabled={selectedIds.size === 0 || hasAdvancedSelected}
+                            >
+                                <Ionicons 
+                                    name="trash" 
+                                    size={24} 
+                                    color={selectedIds.size === 0 ? colors.textMuted : (hasAdvancedSelected ? colors.warning : colors.error)} 
+                                />
+                            </Pressable>
+                        </View>
                     )}
                 </View>
                 {(!isAdmin && !isBranchManager && !isSelectionMode) && <View style={{ width: 44 }} />}

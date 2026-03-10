@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { View, StyleSheet, Button } from 'react-native';
+import { View, StyleSheet, Button, Pressable, Text } from 'react-native';
 import SignatureScreen, { SignatureViewRef } from 'react-native-signature-canvas';
 import { colors, borderRadius } from '../styles/theme';
 
@@ -34,22 +34,30 @@ export const SignaturePad = ({ onOK, onEmpty }: SignaturePadProps) => {
                     ref={ref}
                     onOK={handleOK}
                     onEmpty={handleEmpty}
-                    descriptionText="Sign above"
-                    clearText="Clear"
-                    confirmText="Confirm"
-                    webStyle={`
-                        .m-signature-pad { box-shadow: none; border: none; } 
-                        .m-signature-pad--body { border: none; }
-                        .m-signature-pad--footer { display: none; margin: 0px; }
-                        body,html { width: 100%; height: 100%; }
-                    `}
-                    autoClear={true}
+                    autoClear={false}
                     imageType="image/png"
+                    backgroundColor="#FFFFFF"
+                    penColor="#000000"
+                    minWidth={2}
+                    maxWidth={4}
+                    style={{ backgroundColor: '#FFFFFF', flex: 1 }}
+                    containerStyle={{ backgroundColor: '#FFFFFF', flex: 1 }}
+                    webStyle={`
+                        .m-signature-pad { background-color: #FFFFFF !important; border: none !important; box-shadow: none !important; }
+                        .m-signature-pad--body { background-color: #FFFFFF !important; border: none !important; }
+                        canvas { background-color: #FFFFFF !important; }
+                        .m-signature-pad--footer { display: none !important; }
+                        body, html { background-color: #FFFFFF !important; }
+                    `}
                 />
             </View>
             <View style={styles.actions}>
-                <Button title="Clear" onPress={handleClear} color={colors.error} />
-                <Button title="Confirm Signature" onPress={handleConfirm} color={colors.primary} />
+                <Pressable style={styles.clearBtn} onPress={handleClear}>
+                    <Text style={styles.clearBtnText}>CLEAR PAD</Text>
+                </Pressable>
+                <Pressable style={styles.confirmBtn} onPress={handleConfirm}>
+                    <Text style={styles.confirmBtnText}>USE SIGNATURE</Text>
+                </Pressable>
             </View>
         </View>
     );
@@ -57,24 +65,50 @@ export const SignaturePad = ({ onOK, onEmpty }: SignaturePadProps) => {
 
 const styles = StyleSheet.create({
     container: {
-        height: 400, // Increased from 250 to make it significantly larger
-        backgroundColor: colors.surface,
-        borderRadius: borderRadius.lg,
+        height: 350,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
         overflow: 'hidden',
-        borderWidth: 1,
+        borderWidth: 2,
         borderColor: colors.border,
-        marginVertical: 10,
+        marginVertical: 12,
     },
     pad: {
         flex: 1,
-        backgroundColor: 'white',
+        backgroundColor: '#FFFFFF',
     },
     actions: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
-        padding: 10,
-        backgroundColor: colors.surface,
-        borderTopWidth: 1,
-        borderColor: colors.border,
+        padding: 12,
+        backgroundColor: '#F1F5F9',
+        gap: 12,
+    },
+    clearBtn: {
+        flex: 1,
+        paddingVertical: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#FFFFFF',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: colors.error,
+    },
+    clearBtnText: {
+        color: colors.error,
+        fontWeight: 'bold',
+        fontSize: 12,
+    },
+    confirmBtn: {
+        flex: 2,
+        paddingVertical: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.primary,
+        borderRadius: 8,
+    },
+    confirmBtnText: {
+        color: '#FFFFFF',
+        fontWeight: 'bold',
+        fontSize: 12,
     },
 });

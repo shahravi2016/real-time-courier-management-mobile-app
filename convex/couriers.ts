@@ -62,9 +62,20 @@ export const generateUploadUrl = mutation(async (ctx) => {
 export const list = query({
     args: { 
         branchId: v.optional(v.id("branches")),
-        unassignedOnly: v.optional(v.boolean()) 
+        unassignedOnly: v.optional(v.boolean()),
+        userId: v.optional(v.id("users")), // NEW: To identify requester role
     },
     handler: async (ctx, args) => {
+        let requesterBranchId = args.branchId;
+
+        // If a userId is provided, check if they are a Branch Manager to enforce security
+        if (args.userId) {
+            const user = await ctx.db.get(args.userId);
+            if (user && user.role === "branch_manager") {
+                requesterBranchId = user.branchId;
+            }
+        }
+
         if (args.unassignedOnly) {
             return await ctx.db
                 .query("couriers")
@@ -72,13 +83,23 @@ export const list = query({
                 .order("desc")
                 .collect();
         }
-        if (args.branchId) {
-            return await ctx.db
+
+        if (requesterBranchId) {
+            const myBranch = await ctx.db
                 .query("couriers")
-                .withIndex("by_branchId", (q) => q.eq("branchId", args.branchId))
-                .order("desc")
+                .withIndex("by_branchId", (q) => q.eq("branchId", requesterBranchId))
                 .collect();
+            
+            // Branch managers also need to see unassigned parcels to pick them up
+            const unassigned = await ctx.db
+                .query("couriers")
+                .filter(q => q.eq(q.field("branchId"), undefined))
+                .collect();
+
+            // Combine and sort (manual sort because of filter/index combo)
+            return [...myBranch, ...unassigned].sort((a, b) => b.createdAt - a.createdAt);
         }
+
         return await ctx.db.query("couriers").order("desc").collect();
     },
 });
@@ -94,14 +115,19 @@ export const getById = query({
 
         if (args.userId) {
             const user = await ctx.db.get(args.userId as Id<"users">);
-            if (user && user.role === "customer") {
+            if (!user) return null;
+
+            if (user.role === "customer") {
                 const uPhone = normalizePhone(user.phone || "");
                 const sPhone = normalizePhone(courier.senderPhone || "");
                 const rPhone = normalizePhone(courier.receiverPhone);
                 const isOwner = sPhone === uPhone || rPhone === uPhone || courier.senderName === user.name;
                 if (!isOwner) return null;
-            } else if (user && user.role === "agent") {
+            } else if (user.role === "agent") {
                 if (courier.assignedTo !== args.userId && courier.branchId !== user.branchId) return null;
+            } else if (user.role === "branch_manager") {
+                // NEW: Branch Manager Security
+                if (courier.branchId && courier.branchId !== user.branchId) return null;
             }
         }
 
@@ -398,11 +424,22 @@ export const update = mutation({
         price: v.optional(v.number()),
         branchId: v.optional(v.id("branches")),
         deliveryType: v.optional(v.union(v.literal("normal"), v.literal("express"))),
+        userId: v.optional(v.id("users")), // NEW: Requester ID
     },
     handler: async (ctx, args) => {
-        const { id, ...updates } = args;
+        const { id, userId, ...updates } = args;
         const courier = await ctx.db.get(id);
         if (!courier) throw new Error("Not found");
+
+        // NEW: Security Check for Branch Managers
+        if (userId) {
+            const requester = await ctx.db.get(userId);
+            if (requester && requester.role === "branch_manager") {
+                if (courier.branchId && courier.branchId !== requester.branchId) {
+                    throw new Error("Access Denied: You do not have permission to edit parcels from other branches.");
+                }
+            }
+        }
 
         // Loophole Protection 1: Prevent any edits on Delivered parcels
         if (courier.currentStatus === "delivered") {
@@ -547,7 +584,10 @@ export const updateStatus = mutation({
             ? "Booking restored and re-posted to system" 
             : `Status updated to ${args.status.replace('_', ' ')}`;
 
-        await ctx.db.patch(args.id, { currentStatus: args.status, updatedAt: Date.now() });
+        const patch: any = { currentStatus: args.status, updatedAt: Date.now() };
+        if (isRestoring) patch.assignedTo = undefined; // Clear agent on restoration (Item 4)
+
+        await ctx.db.patch(args.id, patch);
         
         await ctx.db.insert("logs", { 
             courierId: args.id, 
@@ -570,7 +610,7 @@ export const cancelCourier = mutation({
             throw new Error(`Cancellation not allowed. Parcel is already in '${courier.currentStatus}' state.`);
         }
 
-        await ctx.db.patch(args.id, { currentStatus: "cancelled", updatedAt: Date.now() });
+        await ctx.db.patch(args.id, { currentStatus: "cancelled", updatedAt: Date.now(), assignedTo: undefined });
         
         await ctx.db.insert("logs", { 
             courierId: args.id, 
@@ -626,11 +666,14 @@ export const removeMultiple = mutation({
                 throw new Error(`Cannot delete tracking ID ${courier.trackingId}. It is already in '${courier.currentStatus}' state.`);
             }
             
-            // Delete associated logs and the courier
+            // Item 2: Delete associated records (Logs, Invoices, POD)
             const logs = await ctx.db.query("logs").withIndex("by_courierId", q => q.eq("courierId", id)).collect();
-            for (const log of logs) {
-                await ctx.db.delete(log._id);
-            }
+            for (const log of logs) await ctx.db.delete(log._id);
+
+            const invoices = await ctx.db.query("invoices").withIndex("by_courierId", q => q.eq("courierId", id)).collect();
+            for (const inv of invoices) await ctx.db.delete(inv._id);
+
+            if (courier.podId) await ctx.db.delete(courier.podId);
             
             await ctx.db.delete(id);
         }
@@ -640,6 +683,18 @@ export const removeMultiple = mutation({
 export const remove = mutation({
     args: { id: v.id("couriers") },
     handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) return;
+
+        // Cleanup associated records (Item 2)
+        const logs = await ctx.db.query("logs").withIndex("by_courierId", q => q.eq("courierId", args.id)).collect();
+        for (const log of logs) await ctx.db.delete(log._id);
+
+        const invoices = await ctx.db.query("invoices").withIndex("by_courierId", q => q.eq("courierId", args.id)).collect();
+        for (const inv of invoices) await ctx.db.delete(inv._id);
+
+        if (courier.podId) await ctx.db.delete(courier.podId);
+
         await ctx.db.delete(args.id);
     },
 });
