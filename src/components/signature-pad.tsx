@@ -5,7 +5,7 @@ import { colors, borderRadius } from '../styles/theme';
 
 interface SignaturePadProps {
     onOK: (signature: string) => void;
-    onEmpty: () => void;
+    onEmpty?: () => void;
 }
 
 export const SignaturePad = ({ onOK, onEmpty }: SignaturePadProps) => {
@@ -16,7 +16,7 @@ export const SignaturePad = ({ onOK, onEmpty }: SignaturePadProps) => {
     };
 
     const handleEmpty = () => {
-        onEmpty();
+        if (onEmpty) onEmpty();
     };
 
     const handleClear = () => {
@@ -57,16 +57,17 @@ export const SignaturePad = ({ onOK, onEmpty }: SignaturePadProps) => {
 
 const styles = StyleSheet.create({
     container: {
-        height: 250,
+        height: 400, // Increased from 250 to make it significantly larger
         backgroundColor: colors.surface,
         borderRadius: borderRadius.lg,
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: colors.border,
+        marginVertical: 10,
     },
     pad: {
         flex: 1,
-        backgroundColor: 'white', // Signature canvas needs white background usually
+        backgroundColor: 'white',
     },
     actions: {
         flexDirection: 'row',

@@ -2,8 +2,15 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
 export const listAgents = query({
-    args: {},
-    handler: async (ctx) => {
+    args: { branchId: v.optional(v.id("branches")) },
+    handler: async (ctx, args) => {
+        if (args.branchId) {
+            return await ctx.db
+                .query("users")
+                .withIndex("by_branchId", (q) => q.eq("branchId", args.branchId))
+                .filter((q) => q.eq(q.field("role"), "agent"))
+                .collect();
+        }
         return await ctx.db
             .query("users")
             .withIndex("by_role", (q) => q.eq("role", "agent"))

@@ -439,11 +439,22 @@ export default function DashboardScreen() {
         }
     };
 
-    if (authLoading || !stats) {
+    if (authLoading) {
         return (
             <SafeAreaView style={globalStyles.safeArea}>
                 <Stack.Screen options={{ headerShown: false }} />
-                <LoadingState message="Loading dashboard..." />
+                <LoadingState message="Verifying session..." />
+            </SafeAreaView>
+        );
+    }
+
+    // If auth is done but user is gone, useEffect handles redirect.
+    // If user is here but stats still loading, show loading dash.
+    if (!user || (!stats && !adminDashboardStats && !branchDashboardStats && !agentStats && !customerStats)) {
+        return (
+            <SafeAreaView style={globalStyles.safeArea}>
+                <Stack.Screen options={{ headerShown: false }} />
+                <LoadingState message="Syncing with cloud..." />
             </SafeAreaView>
         );
     }
@@ -684,17 +695,13 @@ export default function DashboardScreen() {
                         <AnalyticsChart 
                             title="Daily Orders Trend" 
                             type="bar"
-                            data={Object.entries(adminDashboardStats.monthlyOrders)
-                                .sort((a, b) => Number(a[0]) - Number(b[0]))
-                                .map(([day, count]) => ({ label: day, value: count as number }))}
+                            data={adminDashboardStats.monthlyOrders}
                         />
                         <AnalyticsChart 
                             title="Revenue Growth Trends (₹)" 
                             type="bar"
                             suffix="₹"
-                            data={Object.entries(adminDashboardStats.revenueTrends)
-                                .sort((a, b) => Number(a[0]) - Number(b[0]))
-                                .map(([day, rev]) => ({ label: day, value: rev as number, color: colors.success }))}
+                            data={adminDashboardStats.revenueTrends.map(item => ({ ...item, color: colors.success }))}
                         />
                     </View>
                 )}
@@ -715,17 +722,13 @@ export default function DashboardScreen() {
                         <AnalyticsChart 
                             title="Local Order Volume" 
                             type="bar"
-                            data={Object.entries(branchDashboardStats.monthlyOrders)
-                                .sort((a, b) => Number(a[0]) - Number(b[0]))
-                                .map(([day, count]) => ({ label: day, value: count as number }))}
+                            data={branchDashboardStats.monthlyOrders}
                         />
                          <AnalyticsChart 
                             title="Revenue Trends (₹)" 
                             type="bar"
                             suffix="₹"
-                            data={Object.entries(branchDashboardStats.revenueTrends)
-                                .sort((a, b) => Number(a[0]) - Number(b[0]))
-                                .map(([day, rev]) => ({ label: day, value: rev as number, color: colors.success }))}
+                            data={branchDashboardStats.revenueTrends.map(item => ({ ...item, color: colors.success }))}
                         />
                     </View>
                 )}

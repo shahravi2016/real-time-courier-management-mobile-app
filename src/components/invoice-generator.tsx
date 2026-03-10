@@ -1,17 +1,19 @@
-import React from 'react';
+﻿import React from 'react';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { Button, Alert, Platform } from 'react-native';
-
-interface InvoiceProps {
-    courier: any;
-    invoiceId: string;
-}
+import { Alert, Platform } from 'react-native';
 
 export const generateAndShareInvoice = async (courier: any, invoiceNumber: string) => {
     const isExpress = courier.deliveryType === 'express';
-    const subtotal = (courier.weight || 0) * 5 + (courier.distance || 0) * 2 + 10;
+    
+    // MATCH BACKEND CONSTANTS
+    const BASE_FARE = 50;
+    const WEIGHT_RATE = 10;
+    const DISTANCE_RATE = 5;
+
+    const subtotal = (courier.weight || 0) * WEIGHT_RATE + (courier.distance || 0) * DISTANCE_RATE + BASE_FARE;
     const expressSurcharge = isExpress ? subtotal * 0.5 : 0;
+    const calculatedTotal = subtotal + expressSurcharge;
     const paymentStatus = courier.paymentStatus === 'paid' ? 'PAID' : 'PENDING';
 
     const html = `
@@ -68,18 +70,18 @@ export const generateAndShareInvoice = async (courier: any, invoiceNumber: strin
             <tbody>
                 <tr>
                     <td>Base Fare</td>
-                    <td>₹10.00</td>
-                    <td>₹10.00</td>
+                    <td>₹${BASE_FARE.toFixed(2)}</td>
+                    <td>₹${BASE_FARE.toFixed(2)}</td>
                 </tr>
                 <tr>
-                    <td>Shipping Charges (Weight: ${courier.weight}kg)</td>
-                    <td>₹5.00/kg</td>
-                    <td>₹${((courier.weight || 0) * 5).toFixed(2)}</td>
+                    <td>Shipping Charges (Weight: ${courier.weight || 0}kg)</td>
+                    <td>₹${WEIGHT_RATE.toFixed(2)}/kg</td>
+                    <td>₹${((courier.weight || 0) * WEIGHT_RATE).toFixed(2)}</td>
                 </tr>
                 <tr>
-                    <td>Distance Charges (${courier.distance}km)</td>
-                    <td>₹2.00/km</td>
-                    <td>₹${((courier.distance || 0) * 2).toFixed(2)}</td>
+                    <td>Distance Charges (${Math.round(courier.distance || 0)}km)</td>
+                    <td>₹${DISTANCE_RATE.toFixed(2)}/km</td>
+                    <td>₹${((courier.distance || 0) * DISTANCE_RATE).toFixed(2)}</td>
                 </tr>
                 ${isExpress ? `
                 <tr>
@@ -92,7 +94,7 @@ export const generateAndShareInvoice = async (courier: any, invoiceNumber: strin
         </table>
 
         <div class="total">
-            Total: ₹${(courier.price || 0).toFixed(2)}
+            Total: ₹${calculatedTotal.toFixed(2)}
         </div>
 
         <div class="footer">
@@ -105,10 +107,17 @@ export const generateAndShareInvoice = async (courier: any, invoiceNumber: strin
 
     try {
         const { uri } = await Print.printToFileAsync({ html });
-        console.log('File has been saved to:', uri);
-        await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        if (Platform.OS === 'web') {
+            const pdfWindow = window.open(uri);
+            if (!pdfWindow) {
+                window.alert('Please allow popups to view the invoice.');
+            }
+        } else {
+            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        }
     } catch (error) {
-        Alert.alert('Error', 'Failed to generate invoice');
+        if (Platform.OS === 'web') window.alert('Failed to generate invoice');
+        else Alert.alert('Error', 'Failed to generate invoice');
         console.error(error);
     }
 };

@@ -7,7 +7,7 @@ import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
 import { FormInput } from '../../src/components';
 import { validateName, validatePhone, showAlert } from '../../src/utils/validation';
-import { colors, spacing, globalStyles } from '../../src/styles/theme';
+import { colors, spacing, globalStyles, fontSize } from '../../src/styles/theme';
 import { useAuth } from '../../src/components/auth-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -15,10 +15,7 @@ export default function SettingsScreen() {
     const router = useRouter();
     const { user, updateUser } = useAuth();
 
-    // Safety check in case auth hasn't loaded 
-    if (!user) {
-        return null;
-    }
+    if (!user) return null;
 
     const isAdmin = user.role === 'admin';
     const isRestricted = user.role === 'agent' || user.role === 'branch_manager';
@@ -34,7 +31,6 @@ export default function SettingsScreen() {
     });
     const [errors, setErrors] = useState<Record<string, string>>({});
 
-    // Keep form sync'd if user context updates
     useEffect(() => {
         setForm({
             name: user.name || '',
@@ -46,31 +42,31 @@ export default function SettingsScreen() {
     const updateField = (field: string, value: string) => {
         setForm((prev) => ({ ...prev, [field]: value }));
         if (errors[field]) {
-            setErrors((prev) => ({ ...prev, [field]: '' }));
+            setErrors((prev) => {
+                const newErrs = { ...prev };
+                delete newErrs[field];
+                return newErrs;
+            });
         }
     };
 
     const validate = () => {
-        const nameValid = validateName(form.name, 'Full Name');
-        if (!nameValid.isValid) {
-            showAlert('Validation Error', nameValid.message!);
-            return false;
+        const newErrors: Record<string, string> = {};
+        
+        if (!form.name.trim() || form.name.length < 3) {
+            newErrors.name = 'Full name must be at least 3 characters';
         }
 
-        const phoneValid = validatePhone(form.phone, true);
-        if (!phoneValid.isValid) {
-            showAlert('Validation Error', phoneValid.message!);
-            return false;
+        if (!form.phone.trim() || form.phone.length < 10) {
+            newErrors.phone = 'Please enter a valid 10-digit phone number';
         }
 
-        if (isAdmin && form.password) {
-            if (form.password.length < 6) {
-                showAlert('Security Error', 'New password must be at least 6 characters.');
-                return false;
-            }
+        if (isAdmin && form.password && form.password.length < 6) {
+            newErrors.password = 'New password must be at least 6 characters';
         }
         
-        return true;
+        setErrors(newErrors);
+        return Object.keys(newErrors).length === 0;
     };
 
     const handleSave = async () => {
@@ -79,7 +75,7 @@ export default function SettingsScreen() {
         setIsSubmitting(true);
         try {
             const updatedName = form.name.trim();
-            const updatedPhone = form.phone.trim() || undefined;
+            const updatedPhone = form.phone.trim();
 
             await updateProfile({
                 id: user._id as Id<'users'>,
@@ -88,14 +84,13 @@ export default function SettingsScreen() {
                 password: (isAdmin && form.password) ? form.password : undefined,
             });
 
-            // Update local state and AsyncStorage for immediate real-time reflection across the app
             await updateUser({
                 name: updatedName,
                 phone: updatedPhone,
             });
 
             Alert.alert('Success', 'Profile updated successfully', [
-                { text: 'OK', onPress: () => router.back() },
+                { text: 'OK', onPress: () => router.canGoBack() ? router.back() : router.replace('/') },
             ]);
         } catch (error: any) {
             Alert.alert('Error', error.message || 'Failed to update profile.');
@@ -107,9 +102,9 @@ export default function SettingsScreen() {
     return (
         <SafeAreaView style={globalStyles.safeArea}>
             <Stack.Screen options={{ headerShown: false }} />
-            {/* Header */}
+            
             <View style={styles.header}>
-                <Pressable onPress={() => router.back()} style={styles.backButton}>
+                <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.backButton}>
                     <Ionicons name="arrow-back" size={24} color={colors.text} />
                 </Pressable>
                 <Text style={styles.headerTitle}>Profile Settings</Text>
@@ -222,120 +217,25 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        padding: spacing.lg,
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.md,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    backButton: {
-        padding: spacing.sm,
-    },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: colors.text,
-    },
-    card: {
-        backgroundColor: colors.surface,
-        borderRadius: 16,
-        padding: spacing.xl,
-        borderWidth: 1,
-        borderColor: colors.border,
-        marginBottom: spacing.xxl,
-    },
-    avatarContainer: {
-        alignItems: 'center',
-        marginBottom: spacing.xl,
-    },
-    avatar: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: colors.primary,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: spacing.md,
-    },
-    avatarText: {
-        color: '#fff',
-        fontSize: 32,
-        fontWeight: 'bold',
-    },
-    roleBadge: {
-        backgroundColor: colors.border,
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-        borderRadius: 12,
-    },
-    roleBadgeText: {
-        color: colors.textSecondary,
-        fontSize: 12,
-        fontWeight: '600',
-        letterSpacing: 0.5,
-    },
-    sectionTitle: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: colors.text,
-        marginBottom: spacing.lg,
-        marginTop: spacing.md,
-    },
-    inputContainer: {
-        marginBottom: spacing.lg,
-    },
-    inputLabel: {
-        fontSize: 14,
-        color: colors.textSecondary,
-        marginBottom: 8,
-        fontWeight: '500',
-    },
-    readOnlyInput: {
-        backgroundColor: colors.surfaceElevated,
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: 8,
-        padding: spacing.md,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    lockedInput: {
-        opacity: 0.9,
-    },
-    readOnlyText: {
-        color: colors.textMuted,
-        fontSize: 16,
-    },
-    helperText: {
-        fontSize: 12,
-        color: colors.primary,
-        marginTop: 6,
-        fontStyle: 'italic',
-    },
-    saveButton: {
-        backgroundColor: colors.primary,
-        padding: spacing.md,
-        borderRadius: 8,
-        alignItems: 'center',
-        marginTop: spacing.lg,
-    },
-    saveButtonPressed: {
-        opacity: 0.8,
-    },
-    saveButtonDisabled: {
-        opacity: 0.5,
-    },
-    saveButtonText: {
-        color: '#fff',
-        fontSize: 16,
-        fontWeight: '600',
-    },
+    container: { flex: 1, padding: spacing.lg },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.md, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
+    backButton: { padding: spacing.sm },
+    headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.text },
+    card: { backgroundColor: colors.surface, borderRadius: 16, padding: spacing.xl, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.xxl },
+    avatarContainer: { alignItems: 'center', marginBottom: spacing.xl },
+    avatar: { width: 80, height: 80, borderRadius: 40, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },
+    avatarText: { color: '#fff', fontSize: 32, fontWeight: 'bold' },
+    roleBadge: { backgroundColor: colors.border, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+    roleBadgeText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600', letterSpacing: 0.5 },
+    sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: spacing.lg, marginTop: spacing.md },
+    inputContainer: { marginBottom: spacing.lg },
+    inputLabel: { fontSize: 14, color: colors.textSecondary, marginBottom: 8, fontWeight: '500' },
+    readOnlyInput: { backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: spacing.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    lockedInput: { opacity: 0.9 },
+    readOnlyText: { color: colors.textMuted, fontSize: 16 },
+    helperText: { fontSize: 12, color: colors.primary, marginTop: 6, fontStyle: 'italic' },
+    saveButton: { backgroundColor: colors.primary, padding: spacing.md, borderRadius: 8, alignItems: 'center', marginTop: spacing.lg },
+    saveButtonPressed: { opacity: 0.8 },
+    saveButtonDisabled: { opacity: 0.5 },
+    saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

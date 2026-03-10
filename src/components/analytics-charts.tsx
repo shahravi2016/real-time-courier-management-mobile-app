@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, Platform } from 'react-native';
 import { colors, spacing, fontSize } from '../styles/theme';
 
 interface DataPoint {
@@ -28,7 +28,6 @@ export const AnalyticsChart: React.FC<ChartProps> = ({ title, data, type = 'bar'
                     <Text style={styles.emptyText}>No data available for this period</Text>
                 </View>
             ) : type === 'bar' ? (
-                // ... (previous bar logic remains same)
                 <View style={styles.barChart}>
                     {data.map((item, index) => (
                         <View key={index} style={styles.barContainer}>
@@ -37,7 +36,7 @@ export const AnalyticsChart: React.FC<ChartProps> = ({ title, data, type = 'bar'
                                     style={[
                                         styles.bar, 
                                         { 
-                                            height: `${(item.value / maxValue) * 100}%`,
+                                            height: `${Math.max((item.value / maxValue) * 100, 2)}%`, // Min 2% visibility
                                             backgroundColor: item.color || colors.primary
                                         }
                                     ]} 
@@ -60,7 +59,7 @@ export const AnalyticsChart: React.FC<ChartProps> = ({ title, data, type = 'bar'
                                     style={[
                                         styles.hBarFill, 
                                         { 
-                                            width: `${(item.value / maxValue) * 100}%`,
+                                            width: `${Math.max((item.value / maxValue) * 100, 2)}%`,
                                             backgroundColor: item.color || colors.primary
                                         }
                                     ]} 
@@ -111,6 +110,7 @@ const styles = StyleSheet.create({
         marginVertical: spacing.sm,
         borderWidth: 1,
         borderColor: colors.border,
+        minWidth: 200,
     },
     title: {
         fontSize: fontSize.md,
@@ -120,17 +120,18 @@ const styles = StyleSheet.create({
     },
     barChart: {
         flexDirection: 'row',
-        height: 150,
+        height: 180, // Increased height to accommodate labels
         alignItems: 'flex-end',
         justifyContent: 'space-around',
-        paddingBottom: 20,
+        paddingBottom: 30, // More padding for bottom labels
     },
     barContainer: {
         flex: 1,
         alignItems: 'center',
+        height: '100%',
     },
     barWrapper: {
-        height: '100%',
+        height: '80%', // Limit height to leave room for labels
         width: 12,
         backgroundColor: colors.border + '50',
         borderRadius: 6,
@@ -144,9 +145,9 @@ const styles = StyleSheet.create({
     barLabel: {
         fontSize: 10,
         color: colors.textMuted,
-        marginTop: 6,
-        position: 'absolute',
-        bottom: -20,
+        marginTop: 8,
+        textAlign: 'center',
+        width: '100%',
     },
     horizontalChart: {
         gap: spacing.md,
@@ -225,6 +226,7 @@ const styles = StyleSheet.create({
         borderColor: colors.border,
         borderStyle: 'dashed',
         borderRadius: 12,
+        backgroundColor: colors.surfaceHighlight + '50',
     },
     emptyText: {
         fontSize: fontSize.sm,

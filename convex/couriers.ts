@@ -5,9 +5,8 @@ import { Id } from "./_generated/dataModel";
 // --- Helpers ---
 const normalizePhone = (p: string) => p.replace(/\D/g, "");
 
-// Haversine Distance Formula (Returns KM)
 function calculateHaversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371; // Earth's radius in km
+    const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = 
@@ -18,7 +17,6 @@ function calculateHaversine(lat1: number, lon1: number, lat2: number, lon2: numb
     return R * c;
 }
 
-// Helper to generate 4-digit OTP
 function generateOTP(): string {
     return Math.floor(1000 + Math.random() * 9000).toString();
 }
@@ -33,22 +31,34 @@ function generateInvoiceNumber(): string {
     return `INV-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
 }
 
-// --- Pricing Engine ---
-const BASE_RATE = 50; 
-const WEIGHT_RATE = 10; 
-const DISTANCE_RATE = 5; 
+const BASE_RATE = 100; 
+const WEIGHT_RATE = 20; 
+const DISTANCE_RATE = 10; 
 
 function calculatePrice(weight?: number, distance?: number, type?: "normal" | "express") {
-    let price = BASE_RATE;
-    if (weight) price += weight * WEIGHT_RATE;
-    if (distance) price += distance * DISTANCE_RATE;
-    if (type === "express") price *= 1.5; 
-    return Math.round(price);
+    let subtotal = BASE_RATE;
+    if (weight) subtotal += weight * WEIGHT_RATE;
+    if (distance) subtotal += distance * DISTANCE_RATE;
+    
+    let total = subtotal;
+    if (type === "express") {
+        total += subtotal * 0.5; // 50% express surcharge
+    }
+    
+    // Add 12% GST
+    total += total * 0.12;
+    
+    return Math.round(total);
 }
+
+// --- Storage Logic ---
+
+export const generateUploadUrl = mutation(async (ctx) => {
+    return await ctx.storage.generateUploadUrl();
+});
 
 // --- Queries ---
 
-// List couriers with Unassigned Filter support
 export const list = query({
     args: { 
         branchId: v.optional(v.id("branches")),
@@ -95,13 +105,38 @@ export const getById = query({
             }
         }
 
-        let pod = courier.podId ? await ctx.db.get(courier.podId) : null;
+        let pod = null;
+        if (courier.podId) {
+            const podData = await ctx.db.get(courier.podId);
+            if (podData) {
+                const getSafeUrl = async (idOrBase64?: string) => {
+                    if (!idOrBase64) return null;
+                    const val = idOrBase64.trim();
+                    if (val.startsWith('data:image') || val.length > 500) return val;
+                    try {
+                        return await ctx.storage.getUrl(val);
+                    } catch (e) {
+                        return null;
+                    }
+                };
+                pod = {
+                    ...podData,
+                    signatureUrl: await getSafeUrl(podData.signatureId),
+                    photoUrl: await getSafeUrl(podData.photoId),
+                };
+            }
+        }
+
+        // Smart Invoice Search: Try to find by link first, then by courierId
         let invoice = courier.invoiceId ? await ctx.db.get(courier.invoiceId) : null;
+        if (!invoice) {
+            invoice = await ctx.db.query("invoices").withIndex("by_courierId", q => q.eq("courierId", args.id)).first();
+        }
+
         return { ...courier, pod, invoice };
     },
 });
 
-// Stats with "Needs Attention" (Orphaned) support
 export const getStats = query({
     args: { branchId: v.optional(v.id("branches")) },
     handler: async (ctx, args) => {
@@ -109,13 +144,13 @@ export const getStats = query({
             ? await ctx.db.query("couriers").withIndex("by_branchId", q => q.eq("branchId", args.branchId)).collect()
             : await ctx.db.query("couriers").collect();
 
-        // Needs Attention = Booked but no branch assigned (orphaned customer bookings)
         const needsAttention = all.filter(c => c.currentStatus === "booked" && !c.branchId).length;
 
         return {
             total: all.length,
             booked: all.filter(c => c.currentStatus === "booked").length,
-            outForDelivery: all.filter(c => c.currentStatus === "out_for_delivery").length,
+            pickedUp: all.filter(c => c.currentStatus === "picked_up").length,
+            dispatched: all.filter(c => c.currentStatus === "dispatched").length,
             delivered: all.filter(c => c.currentStatus === "delivered").length,
             needsAttention, 
             revenue: all.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0),
@@ -123,13 +158,11 @@ export const getStats = query({
     },
 });
 
-// Admin Dashboard Stats
 export const getAdminDashboardStats = query({
     args: {},
     handler: async (ctx) => {
         const allCouriers = await ctx.db.query("couriers").collect();
         const allBranches = await ctx.db.query("branches").collect();
-
         const branchContribution = allBranches.map(b => {
             const branchCouriers = allCouriers.filter(c => c.branchId === b._id);
             return {
@@ -138,21 +171,29 @@ export const getAdminDashboardStats = query({
                 revenue: branchCouriers.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0)
             };
         });
+        
+        const now = Date.now();
+        const last30Days = now - (30 * 24 * 60 * 60 * 1000);
+        
+        const formatDate = (ts: number) => {
+            const d = new Date(ts);
+            return `${d.toLocaleString('en-US', { month: 'short' })} ${d.getDate()}`;
+        };
 
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-
-        const monthlyOrders = allCouriers.filter(c => c.createdAt >= startOfMonth).reduce((acc: any, c) => {
-            const day = new Date(c.createdAt).getDate();
+        const ordersByDate = allCouriers.filter(c => c.createdAt >= last30Days).reduce((acc: any, c) => {
+            const day = formatDate(c.createdAt);
             acc[day] = (acc[day] || 0) + 1;
             return acc;
         }, {});
 
-        const revenueTrends = allCouriers.filter(c => c.currentStatus === "delivered" && c.createdAt >= startOfMonth).reduce((acc: any, c) => {
-            const day = new Date(c.createdAt).getDate();
+        const revenueByDate = allCouriers.filter(c => c.currentStatus === "delivered" && c.createdAt >= last30Days).reduce((acc: any, c) => {
+            const day = formatDate(c.createdAt);
             acc[day] = (acc[day] || 0) + (c.price || 0);
             return acc;
         }, {});
+
+        const monthlyOrders = Object.entries(ordersByDate).map(([label, value]) => ({ label, value: value as number }));
+        const revenueTrends = Object.entries(revenueByDate).map(([label, value]) => ({ label, value: value as number }));
 
         return {
             global: {
@@ -166,13 +207,29 @@ export const getAdminDashboardStats = query({
     },
 });
 
-// Branch Manager Stats
 export const getBranchDashboardStats = query({
     args: { branchId: v.id("branches") },
     handler: async (ctx, args) => {
         const myCouriers = await ctx.db.query("couriers").withIndex("by_branchId", q => q.eq("branchId", args.branchId)).collect();
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+        const now = Date.now();
+        const last30Days = now - (30 * 24 * 60 * 60 * 1000);
+        
+        const formatDate = (ts: number) => {
+            const d = new Date(ts);
+            return `${d.toLocaleString('en-US', { month: 'short' })} ${d.getDate()}`;
+        };
+
+        const ordersByDate = myCouriers.filter(c => c.createdAt >= last30Days).reduce((acc: any, c) => {
+            const day = formatDate(c.createdAt);
+            acc[day] = (acc[day] || 0) + 1;
+            return acc;
+        }, {});
+
+        const revenueByDate = myCouriers.filter(c => c.currentStatus === "delivered" && c.createdAt >= last30Days).reduce((acc: any, c) => {
+            const day = formatDate(c.createdAt);
+            acc[day] = (acc[day] || 0) + (c.price || 0);
+            return acc;
+        }, {});
 
         return {
             statusCounts: {
@@ -181,22 +238,13 @@ export const getBranchDashboardStats = query({
                 outForDelivery: myCouriers.filter(c => c.currentStatus === "out_for_delivery").length,
                 delivered: myCouriers.filter(c => c.currentStatus === "delivered").length,
             },
-            monthlyOrders: myCouriers.filter(c => c.createdAt >= startOfMonth).reduce((acc: any, c) => {
-                const day = new Date(c.createdAt).getDate();
-                acc[day] = (acc[day] || 0) + 1;
-                return acc;
-            }, {}),
+            monthlyOrders: Object.entries(ordersByDate).map(([label, value]) => ({ label, value: value as number })),
             branchRevenue: myCouriers.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0),
-            revenueTrends: myCouriers.filter(c => c.currentStatus === "delivered" && c.createdAt >= startOfMonth).reduce((acc: any, c) => {
-                const day = new Date(c.createdAt).getDate();
-                acc[day] = (acc[day] || 0) + (c.price || 0);
-                return acc;
-            }, {}),
+            revenueTrends: Object.entries(revenueByDate).map(([label, value]) => ({ label, value: value as number })),
         };
     },
 });
 
-// Agent Stats
 export const getAgentStats = query({
     args: { userId: v.id("users") },
     handler: async (ctx, args) => {
@@ -212,24 +260,18 @@ export const getAgentStats = query({
     },
 });
 
-// Customer Stats
 export const getCustomerStats = query({
     args: { userId: v.id("users") },
     handler: async (ctx, args) => {
         const user = await ctx.db.get(args.userId);
         if (!user || !user.phone) return { inTransit: 0, delivered: 0, pending: 0, total: 0 };
-
         const phone = user.phone;
-
-        // Efficient Indexed Lookups
         const sent = await ctx.db.query("couriers").withIndex("by_senderPhone", q => q.eq("senderPhone", phone)).collect();
         const received = await ctx.db.query("couriers").withIndex("by_receiverPhone", q => q.eq("receiverPhone", phone)).collect();
         const byName = await ctx.db.query("couriers").withIndex("by_senderName", q => q.eq("senderName", user.name)).collect();
-
         const map = new Map<Id<"couriers">, any>();
         [...sent, ...received, ...byName].forEach(c => map.set(c._id, c));
         const myParcels = Array.from(map.values());
-
         return {
             inTransit: myParcels.filter(c => ["in_transit", "dispatched", "out_for_delivery"].includes(c.currentStatus)).length,
             delivered: myParcels.filter(c => c.currentStatus === "delivered").length,
@@ -251,15 +293,9 @@ export const getMyCouriers = query({
             const user = await ctx.db.get(args.userId);
             if (!user || !user.phone) return [];
             const phone = user.phone;
-            const sent = await ctx.db.query("couriers")
-                .withIndex("by_senderPhone", q => q.eq("senderPhone", phone))
-                .collect();
-            const received = await ctx.db.query("couriers")
-                .withIndex("by_receiverPhone", q => q.eq("receiverPhone", phone))
-                .collect();
-            const byName = await ctx.db.query("couriers")
-                .withIndex("by_senderName", q => q.eq("senderName", user.name))
-                .collect();
+            const sent = await ctx.db.query("couriers").withIndex("by_senderPhone", q => q.eq("senderPhone", phone)).collect();
+            const received = await ctx.db.query("couriers").withIndex("by_receiverPhone", q => q.eq("receiverPhone", phone)).collect();
+            const byName = await ctx.db.query("couriers").withIndex("by_senderName", q => q.eq("senderName", user.name)).collect();
             const map = new Map<Id<"couriers">, any>();
             [...sent, ...received, ...byName].forEach(c => map.set(c._id, c));
             return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
@@ -285,7 +321,6 @@ export const create = mutation({
         branchId: v.optional(v.id("branches")),
         bookedBy: v.optional(v.id("users")),
         deliveryType: v.optional(v.union(v.literal("normal"), v.literal("express"))),
-        // Coordinates for Haversine calculation
         pickupLat: v.optional(v.number()),
         pickupLng: v.optional(v.number()),
         deliveryLat: v.optional(v.number()),
@@ -295,18 +330,14 @@ export const create = mutation({
         const now = Date.now();
         const trackingId = generateTrackingId();
         const otpCode = generateOTP();
-
-        // 1. Logic for Haversine distance
         let distance = args.distance;
         if (!distance && args.pickupLat && args.pickupLng && args.deliveryLat && args.deliveryLng) {
             distance = calculateHaversine(args.pickupLat, args.pickupLng, args.deliveryLat, args.deliveryLng);
-            // Add a small 20% multiplier for road-distance approximation over crow-flies
             distance = Math.round(distance * 1.2); 
         }
-
-        // 2. Final Price Calculation
         const finalPrice = args.price || calculatePrice(args.weight, distance, args.deliveryType || "normal");
-
+        
+        // 1. Insert Courier
         const courierId = await ctx.db.insert("couriers", {
             senderName: args.senderName,
             senderPhone: args.senderPhone,
@@ -329,7 +360,8 @@ export const create = mutation({
             updatedAt: now,
         });
 
-        await ctx.db.insert("invoices", {
+        // 2. Insert Invoice
+        const invoiceId = await ctx.db.insert("invoices", {
             courierId,
             invoiceNumber: generateInvoiceNumber(),
             amount: finalPrice,
@@ -339,14 +371,14 @@ export const create = mutation({
             generatedAt: now,
         });
 
+        // 3. Link Invoice back to Courier (CRITICAL FIX)
+        await ctx.db.patch(courierId, { invoiceId });
+
         await ctx.db.insert("logs", { 
-            courierId, 
-            trackingId, 
-            action: "created", 
+            courierId, trackingId, action: "created", 
             description: `Courier created. Distance: ${distance || 0}km. Price: ₹${finalPrice}`, 
             timestamp: now 
         });
-        
         return courierId;
     },
 });
@@ -355,6 +387,7 @@ export const update = mutation({
     args: {
         id: v.id("couriers"),
         senderName: v.optional(v.string()),
+        senderPhone: v.optional(v.string()),
         receiverName: v.optional(v.string()),
         receiverPhone: v.optional(v.string()),
         pickupAddress: v.optional(v.string()),
@@ -364,22 +397,54 @@ export const update = mutation({
         distance: v.optional(v.number()),
         price: v.optional(v.number()),
         branchId: v.optional(v.id("branches")),
+        deliveryType: v.optional(v.union(v.literal("normal"), v.literal("express"))),
     },
     handler: async (ctx, args) => {
         const { id, ...updates } = args;
         const courier = await ctx.db.get(id);
         if (!courier) throw new Error("Not found");
 
-        if (args.weight !== undefined || args.distance !== undefined) {
-            const newPrice = calculatePrice(args.weight ?? courier.weight, args.distance ?? courier.distance, courier.deliveryType);
+        // Loophole Protection 1: Prevent any edits on Delivered parcels
+        if (courier.currentStatus === "delivered") {
+            throw new Error("Cannot edit details of a delivered parcel. Integrity Lock active.");
+        }
+
+        // Loophole Protection 2: Prevent price-affecting changes once parcel is in movement
+        const isMoving = !["booked", "pending", "cancelled"].includes(courier.currentStatus);
+        const changingPriceFields = args.weight !== undefined || args.deliveryType !== undefined || args.distance !== undefined;
+        
+        if (isMoving && changingPriceFields) {
+            throw new Error(`Cannot change weight or service type once parcel is '${courier.currentStatus}'. Use 'Restoration' flow from Cancelled state if needed.`);
+        }
+
+        // Loophole Protection 3: Recalculate price if fields change
+        if (changingPriceFields) {
+            const newPrice = calculatePrice(
+                args.weight ?? courier.weight, 
+                args.distance ?? courier.distance, 
+                args.deliveryType ?? courier.deliveryType
+            );
             (updates as any).price = newPrice;
+
+            // Sync with Invoices table (Item 1)
+            const invoice = await ctx.db.query("invoices").withIndex("by_courierId", q => q.eq("courierId", id)).first();
+            if (invoice) {
+                await ctx.db.patch(invoice._id, { amount: newPrice });
+            }
         }
 
         const filtered: any = {};
         for (const [k, v] of Object.entries(updates)) if (v !== undefined) filtered[k] = v;
-
+        
         await ctx.db.patch(id, { ...filtered, updatedAt: Date.now() });
-        await ctx.db.insert("logs", { courierId: id, trackingId: courier.trackingId, action: "updated", description: "Courier details updated", timestamp: Date.now() });
+        
+        await ctx.db.insert("logs", { 
+            courierId: id, 
+            trackingId: courier.trackingId, 
+            action: "updated", 
+            description: "Courier details modified by staff", 
+            timestamp: Date.now() 
+        });
     },
 });
 
@@ -396,8 +461,8 @@ export const assignBranch = mutation({
 export const completeDelivery = mutation({
     args: {
         id: v.id("couriers"),
-        signatureId: v.optional(v.string()),
-        photoId: v.optional(v.string()),
+        signatureId: v.optional(v.string()), 
+        photoId: v.optional(v.string()), 
         signeeName: v.string(),
         otpCode: v.string(),
     },
@@ -414,7 +479,48 @@ export const completeDelivery = mutation({
             timestamp: Date.now(),
         });
 
-        await ctx.db.patch(args.id, { currentStatus: "delivered", paymentStatus: "paid", podId, updatedAt: Date.now() });
+        await ctx.db.patch(args.id, { 
+            currentStatus: "delivered", 
+            paymentStatus: "paid", 
+            podId, 
+            updatedAt: Date.now() 
+        });
+        
+        if (courier.invoiceId) {
+            await ctx.db.patch(courier.invoiceId, { status: "paid" });
+        }
+    },
+});
+
+export const assignAgent = mutation({
+    args: { 
+        id: v.id("couriers"), 
+        agentId: v.id("users"),
+        userId: v.optional(v.id("users")) // ID of the person performing the assignment
+    },
+    handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Not found");
+
+        // Integrity Check: If requester is a branch manager, verify agent branch
+        if (args.userId) {
+            const requester = await ctx.db.get(args.userId);
+            if (requester && requester.role === "branch_manager") {
+                const agent = await ctx.db.get(args.agentId);
+                if (!agent || agent.branchId !== requester.branchId) {
+                    throw new Error("Security Violation: Branch Managers can only assign agents from their own branch.");
+                }
+            }
+        }
+
+        await ctx.db.patch(args.id, { assignedTo: args.agentId, updatedAt: Date.now() });
+        await ctx.db.insert("logs", { 
+            courierId: args.id, 
+            trackingId: courier.trackingId, 
+            action: "assigned", 
+            description: `Assigned to delivery agent`, 
+            timestamp: Date.now() 
+        });
     },
 });
 
@@ -425,14 +531,54 @@ export const updateStatus = mutation({
     },
     handler: async (ctx, args) => {
         if (args.status === "delivered") throw new Error("Use POD flow");
+        
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Not found");
+
+        if (args.status === "cancelled") {
+            const allowedStatuses = ["booked", "pending"];
+            if (!allowedStatuses.includes(courier.currentStatus)) {
+                throw new Error(`Cancellation not allowed. Parcel is already in '${courier.currentStatus}' state.`);
+            }
+        }
+
+        const isRestoring = courier.currentStatus === "cancelled" && args.status === "booked";
+        const description = isRestoring 
+            ? "Booking restored and re-posted to system" 
+            : `Status updated to ${args.status.replace('_', ' ')}`;
+
         await ctx.db.patch(args.id, { currentStatus: args.status, updatedAt: Date.now() });
+        
+        await ctx.db.insert("logs", { 
+            courierId: args.id, 
+            trackingId: courier.trackingId, 
+            action: isRestoring ? "restored" : "status_changed", 
+            description, 
+            timestamp: Date.now() 
+        });
     },
 });
 
 export const cancelCourier = mutation({
     args: { id: v.id("couriers") },
     handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Courier not found");
+        
+        const allowedStatuses = ["booked", "pending"];
+        if (!allowedStatuses.includes(courier.currentStatus)) {
+            throw new Error(`Cancellation not allowed. Parcel is already in '${courier.currentStatus}' state.`);
+        }
+
         await ctx.db.patch(args.id, { currentStatus: "cancelled", updatedAt: Date.now() });
+        
+        await ctx.db.insert("logs", { 
+            courierId: args.id, 
+            trackingId: courier.trackingId, 
+            action: "status_changed", 
+            description: "Courier cancelled by user", 
+            timestamp: Date.now() 
+        });
     },
 });
 
@@ -441,6 +587,53 @@ export const markAsPaid = mutation({
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
         await ctx.db.patch(args.id, { paymentStatus: "paid", updatedAt: Date.now() });
+        if (courier?.invoiceId) await ctx.db.patch(courier.invoiceId, { status: "paid" });
+    },
+});
+
+export const getLogs = query({
+    args: { courierId: v.optional(v.id("couriers")), trackingId: v.optional(v.string()) },
+    handler: async (ctx, args) => {
+        if (args.courierId) {
+            return await ctx.db
+                .query("logs")
+                .withIndex("by_courierId", (q) => q.eq("courierId", args.courierId))
+                .order("desc")
+                .collect();
+        }
+        if (args.trackingId) {
+            const tid = args.trackingId;
+            return await ctx.db
+                .query("logs")
+                .withIndex("by_trackingId", (q) => q.eq("trackingId", tid))
+                .order("desc")
+                .collect();
+        }
+        return await ctx.db.query("logs").order("desc").collect();
+    },
+});
+
+export const removeMultiple = mutation({
+    args: { ids: v.array(v.id("couriers")) },
+    handler: async (ctx, args) => {
+        const advancedStatuses = ["picked_up", "dispatched", "in_transit", "out_for_delivery", "delivered"];
+        
+        for (const id of args.ids) {
+            const courier = await ctx.db.get(id);
+            if (!courier) continue;
+
+            if (advancedStatuses.includes(courier.currentStatus)) {
+                throw new Error(`Cannot delete tracking ID ${courier.trackingId}. It is already in '${courier.currentStatus}' state.`);
+            }
+            
+            // Delete associated logs and the courier
+            const logs = await ctx.db.query("logs").withIndex("by_courierId", q => q.eq("courierId", id)).collect();
+            for (const log of logs) {
+                await ctx.db.delete(log._id);
+            }
+            
+            await ctx.db.delete(id);
+        }
     },
 });
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TextInput, StyleSheet, Pressable } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Pressable, Platform } from 'react-native';
 import { colors, spacing, fontSize, globalStyles, borderRadius } from '../styles/theme';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -44,6 +44,7 @@ export function FormInput({
                         error && styles.inputError,
                         icon && { paddingRight: 45 },
                         !editable && { color: colors.text },
+                        Platform.OS === 'web' && { outlineStyle: 'none' } as any,
                     ]}
                     value={value}
                     onChangeText={onChangeText}

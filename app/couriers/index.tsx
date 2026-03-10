@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { View, FlatList, TextInput, StyleSheet, Pressable, Text, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
-import { useQuery } from 'convex/react';
+import { useQuery, useMutation } from 'convex/react';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { api } from '../../convex/_generated/api';
@@ -10,6 +10,7 @@ import { CourierCard, LoadingState, EmptyState } from '../../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/components/auth-context';
+import { Id } from '../../convex/_generated/dataModel';
 
 type CourierStatus =
     | 'booked'
@@ -46,7 +47,12 @@ export default function CourierListScreen() {
     const [selectedFilter, setSelectedFilter] = useState<string>(params.filter === 'needs_attention' ? 'unassigned' : 'all');
     const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
 
+    // Multi-select state
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<Set<Id<'couriers'>>>(new Set());
+
     const { user, isLoading: authLoading } = useAuth();
+    const removeMultiple = useMutation(api.couriers.removeMultiple);
 
     // Force redirect to login if not authenticated
     React.useEffect(() => {
@@ -80,6 +86,45 @@ export default function CourierListScreen() {
     );
 
     const couriers = isAdmin ? allCouriers : (isBranchManager ? branchCouriers : myCouriers);
+
+    const toggleSelection = (id: Id<'couriers'>) => {
+        const newSelected = new Set(selectedIds);
+        if (newSelected.has(id)) {
+            newSelected.delete(id);
+        } else {
+            newSelected.add(id);
+        }
+        setSelectedIds(newSelected);
+        if (newSelected.size === 0 && isSelectionMode) {
+            // Keep selection mode active if user explicitly entered it
+        }
+    };
+
+    const handleBulkDelete = () => {
+        if (selectedIds.size === 0) return;
+
+        Alert.alert(
+            "Bulk Delete",
+            `Are you sure you want to delete ${selectedIds.size} selected items? Advanced parcels will be blocked automatically.`,
+            [
+                { text: "Cancel", style: "cancel" },
+                { 
+                    text: "Delete All", 
+                    style: "destructive", 
+                    onPress: async () => {
+                        try {
+                            await removeMultiple({ ids: Array.from(selectedIds) });
+                            setSelectedIds(new Set());
+                            setIsSelectionMode(false);
+                            Alert.alert("Success", "Selected items deleted.");
+                        } catch (e: any) {
+                            Alert.alert("Integrity Error", e.message);
+                        }
+                    }
+                }
+            ]
+        );
+    };
 
     const filteredCouriers = useMemo(() => {
         if (!couriers) return [];
@@ -178,27 +223,48 @@ export default function CourierListScreen() {
 
             <View style={styles.header}>
                 <Pressable
-                    onPress={() => router.back()}
+                    onPress={() => {
+                        if (isSelectionMode) {
+                            setIsSelectionMode(false);
+                            setSelectedIds(new Set());
+                        } else {
+                            router.canGoBack() ? router.back() : router.replace('/');
+                        }
+                    }}
                     style={({ pressed }) => [
                         styles.backButtonContainer,
                         pressed && { opacity: 0.6 }
                     ]}
                     hitSlop={15}
                 >
-                    <Ionicons name="arrow-back" size={24} color={colors.text} />
+                    <Ionicons name={isSelectionMode ? "close" : "arrow-back"} size={24} color={colors.text} />
                 </Pressable>
-                <Text style={globalStyles.title}>Couriers</Text>
-                {(isAdmin || isBranchManager) && (
-                    <View style={globalStyles.row}>
-                        <Pressable onPress={handleExport} style={{ marginRight: spacing.lg }}>
-                            <Text style={styles.headerButton}>Export</Text>
+                
+                <Text style={globalStyles.title}>
+                    {isSelectionMode ? `${selectedIds.size} Selected` : 'Couriers'}
+                </Text>
+
+                <View style={globalStyles.row}>
+                    {(isAdmin || isBranchManager) && !isSelectionMode && (
+                        <>
+                            <Pressable onPress={() => setIsSelectionMode(true)} style={{ marginRight: spacing.lg }}>
+                                <Text style={styles.headerButton}>Select</Text>
+                            </Pressable>
+                            <Pressable onPress={handleExport} style={{ marginRight: spacing.lg }}>
+                                <Ionicons name="download-outline" size={20} color={colors.primary} />
+                            </Pressable>
+                            <Pressable onPress={() => router.push('/couriers/add')}>
+                                <Ionicons name="add-circle" size={24} color={colors.primary} />
+                            </Pressable>
+                        </>
+                    )}
+                    {isSelectionMode && (
+                        <Pressable onPress={handleBulkDelete} disabled={selectedIds.size === 0}>
+                            <Ionicons name="trash" size={24} color={selectedIds.size > 0 ? colors.error : colors.textMuted} />
                         </Pressable>
-                        <Pressable onPress={() => router.push('/couriers/add')}>
-                            <Text style={styles.headerButton}>+ Add</Text>
-                        </Pressable>
-                    </View>
-                )}
-                {(!isAdmin && !isBranchManager) && <View style={{ width: 44 }} />}
+                    )}
+                </View>
+                {(!isAdmin && !isBranchManager && !isSelectionMode) && <View style={{ width: 44 }} />}
             </View>
 
             <View style={styles.container}>
@@ -288,7 +354,21 @@ export default function CourierListScreen() {
                         renderItem={({ item }) => (
                             <CourierCard
                                 courier={item}
-                                onPress={() => router.push(`/couriers/${item._id}`)}
+                                onPress={() => {
+                                    if (isSelectionMode) {
+                                        toggleSelection(item._id);
+                                    } else {
+                                        router.push(`/couriers/${item._id}`);
+                                    }
+                                }}
+                                onLongPress={() => {
+                                    if (!isSelectionMode) {
+                                        setIsSelectionMode(true);
+                                        toggleSelection(item._id);
+                                    }
+                                }}
+                                isSelected={selectedIds.has(item._id)}
+                                isSelectionMode={isSelectionMode}
                             />
                         )}
                     />

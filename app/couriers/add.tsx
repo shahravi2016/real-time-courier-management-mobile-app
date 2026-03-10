@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, Pressable, Text, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
+import { useRouter, Stack } from 'expo-router';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { FormInput, LoadingState } from '../../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { Id } from '../../convex/_generated/dataModel';
-import { showAlert } from '../../src/utils/validation';
 import { useAuth } from '../../src/components/auth-context';
 import * as Location from 'expo-location';
 
@@ -35,11 +34,13 @@ export default function AddCourierScreen() {
         deliveryAddress: '',
         notes: '',
         weight: '',
-        distance: '', // Still used for manual staff overrides
+        distance: '',
         paymentMethod: 'cash' as 'cash' | 'card' | 'prepaid',
         deliveryType: 'normal' as 'normal' | 'express',
         branchId: '' as string,
     });
+
+    const [errors, setErrors] = useState<Record<string, string>>({});
 
     const [coords, setCoords] = useState({
         pickupLat: undefined as number | undefined,
@@ -51,8 +52,14 @@ export default function AddCourierScreen() {
     const updateField = (field: string, value: string) => {
         setForm((prev) => ({ ...prev, [field]: value }));
         
-        // Logic refinement: If user types manually, clear the hidden GPS cache 
-        // to force a fresh geocode on submission.
+        if (errors[field]) {
+            setErrors(prev => {
+                const newErrs = { ...prev };
+                delete newErrs[field];
+                return newErrs;
+            });
+        }
+
         if (field === 'pickupAddress') {
             setCoords(p => ({ ...p, pickupLat: undefined, pickupLng: undefined }));
         } else if (field === 'deliveryAddress') {
@@ -60,27 +67,63 @@ export default function AddCourierScreen() {
         }
     };
 
+    const geocodeWeb = async (address: string) => {
+        try {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`;
+            const res = await fetch(url, { headers: { 'User-Agent': 'CourierManagerApp' } });
+            const data = await res.json();
+            if (data && data[0]) {
+                return { latitude: parseFloat(data[0].lat), longitude: parseFloat(data[0].lon) };
+            }
+        } catch (e) {
+            console.warn('Web Geocoding failed');
+        }
+        return null;
+    };
+
+    const reverseGeocodeWeb = async (lat: number, lon: number) => {
+        try {
+            const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`;
+            const res = await fetch(url, { headers: { 'User-Agent': 'CourierManagerApp' } });
+            const data = await res.json();
+            if (data && data.display_name) return data.display_name;
+        } catch (e) {
+            console.warn('Web Reverse Geocoding failed');
+        }
+        return null;
+    };
+
     const handleUseCurrentLocation = async () => {
         setIsLocating(true);
         try {
             const { status } = await Location.requestForegroundPermissionsAsync();
             if (status !== 'granted') {
-                Alert.alert('Permission Denied', 'Location access is needed to detect your address.');
+                if (Platform.OS === 'web') window.alert('Location permission denied.');
+                else Alert.alert('Permission Denied', 'Location access is needed.');
                 return;
             }
 
             const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
             const { latitude, longitude } = location.coords;
 
-            // Reverse Geocode to get address string
-            const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
-            if (address) {
-                const addressStr = `${address.name || ''} ${address.street || ''}, ${address.city || ''}, ${address.region || ''} ${address.postalCode || ''}`.trim();
+            let addressStr = '';
+            if (Platform.OS === 'web') {
+                const res = await reverseGeocodeWeb(latitude, longitude);
+                if (res) addressStr = res;
+            } else {
+                const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
+                if (address) {
+                    addressStr = `${address.name || ''} ${address.street || ''}, ${address.city || ''}, ${address.region || ''} ${address.postalCode || ''}`.trim();
+                }
+            }
+
+            if (addressStr) {
                 setForm(p => ({ ...p, pickupAddress: addressStr }));
                 setCoords(p => ({ ...p, pickupLat: latitude, pickupLng: longitude }));
+                if (errors.pickupAddress) setErrors(prev => ({ ...prev, pickupAddress: '' }));
             }
         } catch (error) {
-            Alert.alert('Location Error', 'Could not detect your current location.');
+            console.warn('Location detection failed');
         } finally {
             setIsLocating(false);
         }
@@ -90,52 +133,62 @@ export default function AddCourierScreen() {
         let pickup = { lat: coords.pickupLat, lng: coords.pickupLng };
         let delivery = { lat: coords.deliveryLat, lng: coords.deliveryLng };
 
-        try {
-            // Geocode Pickup if not already detected via GPS
-            if (!pickup.lat) {
-                const res = await Location.geocodeAsync(form.pickupAddress);
-                if (res[0]) {
-                    pickup = { lat: res[0].latitude, lng: res[0].longitude };
-                }
-            }
+        const runGeocode = async (address: string) => {
+            if (Platform.OS === 'web') return await geocodeWeb(address);
+            try {
+                const res = await Location.geocodeAsync(address);
+                return res[0] ? { latitude: res[0].latitude, longitude: res[0].longitude } : null;
+            } catch (e) { return null; }
+        };
 
-            // Geocode Delivery
-            const resDel = await Location.geocodeAsync(form.deliveryAddress);
-            if (resDel[0]) {
-                delivery = { lat: resDel[0].latitude, lng: resDel[0].longitude };
+        try {
+            if (!pickup.lat && form.pickupAddress) {
+                const res = await runGeocode(form.pickupAddress);
+                if (res) pickup = { lat: res.latitude, lng: res.longitude };
+            }
+            if (!delivery.lat && form.deliveryAddress) {
+                const resDel = await runGeocode(form.deliveryAddress);
+                if (resDel) delivery = { lat: resDel.latitude, lng: resDel.longitude };
             }
         } catch (e) {
-            console.warn('Geocoding failed, falling back to manual/default distance.');
+            console.error('Geocoding logic error');
         }
-
         return { pickup, delivery };
     };
 
     const validate = () => {
-        if (!form.receiverName.trim() || !form.receiverPhone.trim()) {
-            showAlert('Validation Error', 'Receiver details are mandatory.');
-            return false;
-        }
-        if (!form.pickupAddress.trim() || !form.deliveryAddress.trim()) {
-            showAlert('Validation Error', 'Addresses are mandatory.');
-            return false;
-        }
-        if (!form.branchId) {
-            showAlert('Hub Required', 'Please select a branch hub.');
-            return false;
-        }
-        return true;
+        const newErrors: Record<string, string> = {};
+        if (!form.receiverName.trim()) newErrors.receiverName = 'Recipient name is required';
+        if (!form.receiverPhone.trim() || form.receiverPhone.length < 10) newErrors.receiverPhone = 'Valid 10-digit phone is required';
+        if (!form.pickupAddress.trim()) newErrors.pickupAddress = 'Pickup point is required';
+        if (!form.deliveryAddress.trim()) newErrors.deliveryAddress = 'Delivery destination is required';
+        if (!form.branchId) newErrors.branchId = 'Please select a service hub';
+
+        setErrors(newErrors);
+        return Object.keys(newErrors).length === 0;
     };
 
     const handleSubmit = async () => {
-        if (!validate()) return;
+        if (!validate() || isSubmitting) return;
 
         setIsSubmitting(true);
         try {
-            // 1. Resolve Coordinates in background
-            const resolvedCoords = await geocodeAddresses();
+            const geocodeTask = geocodeAddresses();
+            const timeoutTask = new Promise((_, reject) => setTimeout(() => reject('timeout'), 3000));
+            
+            let resolvedCoords = { pickup: { lat: undefined, lng: undefined }, delivery: { lat: undefined, lng: undefined } };
+            
+            try {
+                resolvedCoords = await Promise.race([geocodeTask, timeoutTask]) as any;
+            } catch (e) {
+                console.warn('Geocoding timeout');
+            }
 
-            // 2. Submit to backend
+            const cleanNum = (val: string) => {
+                const n = parseFloat(val);
+                return isNaN(n) ? undefined : n;
+            };
+
             await createCourier({
                 senderName: form.senderName.trim(),
                 senderPhone: form.senderPhone.trim(),
@@ -144,36 +197,42 @@ export default function AddCourierScreen() {
                 pickupAddress: form.pickupAddress.trim(),
                 deliveryAddress: form.deliveryAddress.trim(),
                 notes: form.notes.trim() || undefined,
-                weight: parseFloat(form.weight) || undefined,
-                distance: parseFloat(form.distance) || undefined,
+                weight: cleanNum(form.weight),
+                distance: cleanNum(form.distance),
                 branchId: form.branchId as Id<'branches'>,
                 deliveryType: form.deliveryType,
                 bookedBy: user?._id as Id<'users'>,
-                // Pass coordinates for backend Haversine calculation
-                pickupLat: resolvedCoords.pickup.lat,
-                pickupLng: resolvedCoords.pickup.lng,
-                deliveryLat: resolvedCoords.delivery.lat,
-                deliveryLng: resolvedCoords.delivery.lng,
+                pickupLat: resolvedCoords.pickup?.lat,
+                pickupLng: resolvedCoords.pickup?.lng,
+                deliveryLat: resolvedCoords.delivery?.lat,
+                deliveryLng: resolvedCoords.delivery?.lng,
             });
 
-            Alert.alert('Success', 'Courier booked successfully!', [
-                { text: 'View My Parcels', onPress: () => router.replace('/couriers') }
-            ]);
+            if (Platform.OS === 'web') {
+                window.alert('Success! Courier booked successfully.');
+                router.replace('/couriers');
+            } else {
+                Alert.alert('Success', 'Courier booked successfully!', [
+                    { text: 'OK', onPress: () => router.replace('/couriers') }
+                ]);
+            }
         } catch (error: any) {
-            Alert.alert('Error', error.message || 'Failed to create booking.');
+            const msg = error.message || 'Failed to create booking.';
+            if (Platform.OS === 'web') window.alert('Error: ' + msg);
+            else Alert.alert('Error', msg);
         } finally {
             setIsSubmitting(false);
         }
     };
 
-    if (isSubmitting) return <LoadingState message="Calculating route & pricing..." />;
+    if (!branches) return <LoadingState message="Loading service hubs..." />;
 
     return (
         <SafeAreaView style={globalStyles.safeArea}>
             <Stack.Screen options={{ headerShown: false }} />
             
             <View style={styles.header}>
-                <Pressable onPress={() => router.back()} style={styles.backButton}>
+                <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.backButtonContainer}>
                     <Ionicons name="arrow-back" size={24} color={colors.text} />
                 </Pressable>
                 <Text style={styles.headerTitle}>New Shipment</Text>
@@ -189,6 +248,7 @@ export default function AddCourierScreen() {
                         value={form.receiverName}
                         onChangeText={(v) => updateField('receiverName', v)}
                         placeholder="Full name"
+                        error={errors.receiverName}
                     />
                     <FormInput
                         label="Receiver Phone"
@@ -197,6 +257,7 @@ export default function AddCourierScreen() {
                         placeholder="10-digit number"
                         keyboardType="phone-pad"
                         maxLength={10}
+                        error={errors.receiverPhone}
                     />
 
                     <Text style={styles.sectionTitle}>Pickup Address</Text>
@@ -207,6 +268,7 @@ export default function AddCourierScreen() {
                             onChangeText={(v) => updateField('pickupAddress', v)}
                             placeholder="Where should we pick up?"
                             multiline
+                            error={errors.pickupAddress}
                         />
                         <Pressable 
                             style={[styles.locationButton, isLocating && { opacity: 0.7 }]} 
@@ -231,14 +293,15 @@ export default function AddCourierScreen() {
                         onChangeText={(v) => updateField('deliveryAddress', v)}
                         placeholder="Final delivery point"
                         multiline
+                        error={errors.deliveryAddress}
                     />
 
-                    <Text style={styles.sectionTitle}>Nearest Branch Hub</Text>
+                    <Text style={styles.sectionTitle}>Select Pickup Hub (Nearest to you)</Text>
                     <View style={styles.branchGrid}>
                         {branches?.map((branch) => (
                             <Pressable
                                 key={branch._id}
-                                style={[styles.branchChip, form.branchId === branch._id && styles.branchChipActive]}
+                                style={[styles.branchChip, form.branchId === branch._id && styles.branchChipActive, errors.branchId && { borderColor: colors.error }]}
                                 onPress={() => updateField('branchId', branch._id)}
                             >
                                 <Text style={[styles.branchChipText, form.branchId === branch._id && { color: '#fff' }]}>
@@ -247,6 +310,7 @@ export default function AddCourierScreen() {
                             </Pressable>
                         ))}
                     </View>
+                    {errors.branchId && <Text style={styles.errorText}>{errors.branchId}</Text>}
 
                     <Text style={styles.sectionTitle}>Delivery Speed</Text>
                     <View style={styles.deliveryTypeRow}>
@@ -271,29 +335,29 @@ export default function AddCourierScreen() {
                             <Text style={styles.staffTitle}>Logistics Override (Staff Only)</Text>
                             <View style={globalStyles.row}>
                                 <View style={{ flex: 1 }}>
-                                    <FormInput
-                                        label="Weight (kg)"
-                                        value={form.weight}
-                                        onChangeText={(v) => updateField('weight', v)}
-                                        keyboardType="numeric"
-                                    />
+                                    <FormInput label="Weight (kg)" value={form.weight} onChangeText={(v) => updateField('weight', v)} keyboardType="numeric" />
                                 </View>
                                 <View style={{ width: spacing.md }} />
                                 <View style={{ flex: 1 }}>
-                                    <FormInput
-                                        label="Dist Override (km)"
-                                        value={form.distance}
-                                        onChangeText={(v) => updateField('distance', v)}
-                                        keyboardType="numeric"
-                                    />
+                                    <FormInput label="Dist Override (km)" value={form.distance} onChangeText={(v) => updateField('distance', v)} keyboardType="numeric" />
                                 </View>
                             </View>
                         </View>
                     )}
 
-                    <Pressable style={styles.submitButton} onPress={handleSubmit}>
-                        <Text style={styles.submitButtonText}>Confirm Booking</Text>
-                        <Ionicons name="chevron-forward" size={20} color="#fff" />
+                    <Pressable 
+                        style={[styles.submitButton, isSubmitting && { opacity: 0.7 }]} 
+                        onPress={handleSubmit}
+                        disabled={isSubmitting}
+                    >
+                        {isSubmitting ? (
+                            <ActivityIndicator color="#fff" />
+                        ) : (
+                            <>
+                                <Text style={styles.submitButtonText}>Confirm Booking</Text>
+                                <Ionicons name="chevron-forward" size={20} color="#fff" />
+                            </>
+                        )}
                     </Pressable>
 
                     <View style={{ height: 40 }} />
@@ -307,15 +371,16 @@ const styles = StyleSheet.create({
     container: { flex: 1, padding: spacing.lg },
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
     headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.text },
-    backButton: { padding: spacing.sm },
+    backButtonContainer: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
     sectionTitle: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', marginTop: spacing.xl, marginBottom: spacing.sm, letterSpacing: 1 },
     addressWrapper: { position: 'relative' },
     locationButton: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, alignSelf: 'flex-end', marginTop: -spacing.xs, marginBottom: spacing.md },
     locationButtonText: { color: colors.primary, fontSize: 12, fontWeight: '600' },
-    branchGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.md },
+    branchGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
     branchChip: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
     branchChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
     branchChipText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+    errorText: { color: colors.error, fontSize: 10, marginLeft: 4, marginTop: 4 },
     deliveryTypeRow: { flexDirection: 'row', gap: spacing.md },
     typeCard: { flex: 1, padding: spacing.md, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
     typeCardActive: { borderColor: colors.primary, backgroundColor: colors.primary + '10' },

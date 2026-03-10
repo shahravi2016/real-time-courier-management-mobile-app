@@ -7,8 +7,10 @@ import { Ionicons } from '@expo/vector-icons';
 
 type CourierStatus =
     | 'booked'
+    | 'pending'
     | 'picked_up'
     | 'dispatched'
+    | 'in_transit'
     | 'out_for_delivery'
     | 'delivered'
     | 'cancelled';
@@ -26,9 +28,18 @@ interface Courier {
 interface CourierCardProps {
     courier: Courier;
     onPress: () => void;
+    onLongPress?: () => void;
+    isSelected?: boolean;
+    isSelectionMode?: boolean;
 }
 
-export function CourierCard({ courier, onPress }: CourierCardProps) {
+export function CourierCard({ 
+    courier, 
+    onPress, 
+    onLongPress, 
+    isSelected = false, 
+    isSelectionMode = false 
+}: CourierCardProps) {
     const formattedDate = new Date(courier.createdAt).toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
@@ -39,34 +50,51 @@ export function CourierCard({ courier, onPress }: CourierCardProps) {
     return (
         <Pressable
             onPress={onPress}
+            onLongPress={onLongPress}
+            delayLongPress={500}
             style={({ pressed }) => [
                 styles.card,
                 pressed && styles.cardPressed,
+                isSelected && styles.cardSelected,
             ]}
         >
             <View style={styles.header}>
-                <Text style={styles.trackingId}>{courier.trackingId}</Text>
+                <View style={styles.idContainer}>
+                    {isSelectionMode && (
+                        <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                            {isSelected && <Ionicons name="checkmark" size={14} color="#fff" />}
+                        </View>
+                    )}
+                    <Text style={[styles.trackingId, isSelected && { color: colors.primary }]}>{courier.trackingId}</Text>
+                </View>
                 <StatusBadge status={courier.currentStatus} size="small" />
             </View>
 
             <View style={styles.content}>
                 <View style={styles.row}>
-                    <Ionicons name="person-outline" size={14} color={colors.textSecondary} style={styles.icon} />
+                    <Ionicons name="person-outline" size={14} color={isSelected ? colors.primary : colors.textSecondary} style={styles.icon} />
                     <Text style={styles.receiverName}>{courier.receiverName}</Text>
                 </View>
                 <View style={styles.row}>
-                    <Ionicons name="call-outline" size={14} color={colors.textSecondary} style={styles.icon} />
+                    <Ionicons name="call-outline" size={14} color={isSelected ? colors.primary : colors.textSecondary} style={styles.icon} />
                     <Text style={styles.phone}>{courier.receiverPhone}</Text>
                 </View>
                 <View style={styles.row}>
-                    <Ionicons name="location-outline" size={14} color={colors.textSecondary} style={styles.icon} />
+                    <Ionicons name="location-outline" size={14} color={isSelected ? colors.primary : colors.textSecondary} style={styles.icon} />
                     <Text style={styles.address} numberOfLines={1}>
                         {courier.deliveryAddress}
                     </Text>
                 </View>
             </View>
 
-            <Text style={styles.date}>{formattedDate}</Text>
+            <View style={globalStyles.spaceBetween}>
+                <Text style={styles.date}>{formattedDate}</Text>
+                {isSelected && (
+                    <View style={styles.selectionIndicator}>
+                        <Text style={styles.selectionIndicatorText}>SELECTED</Text>
+                    </View>
+                )}
+            </View>
         </Pressable>
     );
 }
@@ -74,7 +102,7 @@ export function CourierCard({ courier, onPress }: CourierCardProps) {
 const styles = StyleSheet.create({
     card: {
         backgroundColor: colors.surface,
-        borderRadius: 12,
+        borderRadius: 16,
         padding: spacing.md,
         marginBottom: spacing.sm,
         borderWidth: 1,
@@ -82,7 +110,12 @@ const styles = StyleSheet.create({
     },
     cardPressed: {
         backgroundColor: colors.surfaceElevated,
-        transform: [{ scale: 0.98 }],
+        transform: [{ scale: 0.99 }],
+    },
+    cardSelected: {
+        borderColor: colors.primary,
+        backgroundColor: colors.primary + '08',
+        borderWidth: 2,
     },
     header: {
         flexDirection: 'row',
@@ -90,14 +123,34 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: spacing.sm,
     },
+    idContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
+    },
+    checkbox: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        borderWidth: 2,
+        borderColor: colors.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'transparent',
+    },
+    checkboxSelected: {
+        backgroundColor: colors.primary,
+        borderColor: colors.primary,
+    },
     trackingId: {
         fontSize: fontSize.md,
-        fontWeight: '700',
+        fontWeight: '800',
         color: colors.text,
         letterSpacing: 0.5,
     },
     content: {
         gap: spacing.xs + 2,
+        marginBottom: spacing.sm,
     },
     row: {
         flexDirection: 'row',
@@ -109,7 +162,7 @@ const styles = StyleSheet.create({
     },
     receiverName: {
         fontSize: fontSize.sm,
-        fontWeight: '500',
+        fontWeight: '600',
         color: colors.text,
     },
     phone: {
@@ -122,9 +175,27 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     date: {
-        fontSize: fontSize.xs,
+        fontSize: 10,
         color: colors.textMuted,
-        marginTop: spacing.sm,
-        textAlign: 'right',
+        fontWeight: '600',
     },
+    selectionIndicator: {
+        backgroundColor: colors.primary,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    selectionIndicatorText: {
+        color: '#fff',
+        fontSize: 8,
+        fontWeight: 'bold',
+    },
+});
+
+const globalStyles = StyleSheet.create({
+    spaceBetween: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    }
 });

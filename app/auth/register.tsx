@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, TextInput, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
+import { FormInput } from '../../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { validateEmail, validateName, validatePhone, showAlert } from '../../src/utils/validation';
+import { validateEmail, validateName, validatePhone } from '../../src/utils/validation';
 
 const ROLES = [
     { label: 'Customer', value: 'customer' },
@@ -23,43 +24,48 @@ export default function RegisterScreen() {
         phone: '',
         role: 'customer' as 'customer',
     });
+    const [errors, setErrors] = useState<Record<string, string>>({});
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const handleRegister = async () => {
-        // Name Validation
-        const nameValid = validateName(form.name, 'Full Name');
-        if (!nameValid.isValid) {
-            showAlert('Registration Error', nameValid.message!);
-            return;
+    const updateField = (field: string, value: string) => {
+        setForm(f => ({ ...f, [field]: value }));
+        if (errors[field]) {
+            setErrors(prev => {
+                const newErrs = { ...prev };
+                delete newErrs[field];
+                return newErrs;
+            });
         }
+    };
 
-        // Email Validation
-        const emailValid = validateEmail(form.email);
-        if (!emailValid.isValid) {
-            showAlert('Registration Error', emailValid.message!);
-            return;
-        }
+    const validate = () => {
+        const newErrors: Record<string, string> = {};
+        
+        const nameV = validateName(form.name, 'Full Name');
+        if (!nameV.isValid) newErrors.name = nameV.message!;
 
-        // Password Validation
-        if (form.password.length < 6) {
-            showAlert('Registration Error', 'Password must be at least 6 characters long.');
-            return;
-        }
+        const emailV = validateEmail(form.email);
+        if (!emailV.isValid) newErrors.email = emailV.message!;
 
-        // Phone Validation (Optional in DB but enforced format if provided)
+        if (form.password.length < 6) newErrors.password = 'Password must be at least 6 characters';
+
         if (form.phone.trim()) {
-            const phoneValid = validatePhone(form.phone);
-            if (!phoneValid.isValid) {
-                showAlert('Registration Error', phoneValid.message!);
-                return;
-            }
+            const phoneV = validatePhone(form.phone);
+            if (!phoneV.isValid) newErrors.phone = phoneV.message!;
         }
+
+        setErrors(newErrors);
+        return Object.keys(newErrors).length === 0;
+    };
+
+    const handleRegister = async () => {
+        if (!validate()) return;
 
         setIsSubmitting(true);
         try {
             await register({
                 ...form,
-                email: form.email.trim(),
+                email: form.email.trim().toLowerCase(),
                 name: form.name.trim(),
                 phone: form.phone.trim() || undefined
             });
@@ -67,7 +73,12 @@ export default function RegisterScreen() {
                 { text: 'OK', onPress: () => router.replace('/auth/login') }
             ]);
         } catch (error: any) {
-            Alert.alert('Error', error.message || 'Registration failed');
+            // Check if error is specifically about the email
+            if (error.message.includes('Email already registered')) {
+                setErrors(prev => ({ ...prev, email: 'This email is already in use.' }));
+            } else {
+                Alert.alert('Registration Failed', error.message || 'Check your internet connection.');
+            }
         } finally {
             setIsSubmitting(false);
         }
@@ -91,55 +102,43 @@ export default function RegisterScreen() {
             >
                 <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
                     <View style={styles.form}>
-                        <View style={styles.inputGroup}>
-                            <Text style={globalStyles.label}>Full Name</Text>
-                            <TextInput
-                                style={globalStyles.input}
-                                placeholder="John Doe"
-                                placeholderTextColor={colors.textMuted}
-                                value={form.name}
-                                onChangeText={(v) => setForm(f => ({ ...f, name: v }))}
-                            />
-                        </View>
+                        <FormInput
+                            label="Full Name"
+                            placeholder="John Doe"
+                            value={form.name}
+                            onChangeText={(v) => updateField('name', v)}
+                            error={errors.name}
+                        />
 
-                        <View style={styles.inputGroup}>
-                            <Text style={globalStyles.label}>Email Address</Text>
-                            <TextInput
-                                style={globalStyles.input}
-                                placeholder="john@example.com"
-                                placeholderTextColor={colors.textMuted}
-                                value={form.email}
-                                onChangeText={(v) => setForm(f => ({ ...f, email: v }))}
-                                autoCapitalize="none"
-                                keyboardType="email-address"
-                            />
-                        </View>
+                        <FormInput
+                            label="Email Address"
+                            placeholder="john@example.com"
+                            value={form.email}
+                            onChangeText={(v) => updateField('email', v)}
+                            keyboardType="email-address"
+                            error={errors.email}
+                        />
 
-                        <View style={styles.inputGroup}>
-                            <Text style={globalStyles.label}>Password</Text>
-                            <TextInput
-                                style={globalStyles.input}
-                                placeholder="••••••••"
-                                placeholderTextColor={colors.textMuted}
-                                value={form.password}
-                                onChangeText={(v) => setForm(f => ({ ...f, password: v }))}
-                                secureTextEntry
-                            />
-                        </View>
+                        <FormInput
+                            label="Password"
+                            placeholder="••••••••"
+                            value={form.password}
+                            onChangeText={(v) => updateField('password', v)}
+                            secureTextEntry
+                            error={errors.password}
+                        />
 
-                        <View style={styles.inputGroup}>
-                            <Text style={globalStyles.label}>Phone Number</Text>
-                            <TextInput
-                                style={globalStyles.input}
-                                placeholder="1234567890"
-                                placeholderTextColor={colors.textMuted}
-                                value={form.phone}
-                                onChangeText={(v) => setForm(f => ({ ...f, phone: v }))}
-                                keyboardType="phone-pad"
-                            />
-                        </View>
+                        <FormInput
+                            label="Phone Number"
+                            placeholder="10-digit number"
+                            value={form.phone}
+                            onChangeText={(v) => updateField('phone', v.replace(/[^0-9]/g, ''))}
+                            keyboardType="phone-pad"
+                            maxLength={10}
+                            error={errors.phone}
+                        />
 
-                        <Text style={globalStyles.label}>Account Role</Text>
+                        <Text style={styles.sectionLabel}>Account Role</Text>
                         <View style={styles.roleContainer}>
                             {ROLES.map((r) => (
                                 <Pressable
@@ -172,7 +171,7 @@ export default function RegisterScreen() {
                             {isSubmitting ? (
                                 <ActivityIndicator color="#fff" size="small" />
                             ) : (
-                                <Text style={styles.submitButtonText}>Create Account</Text>
+                                <Text style={styles.submitButtonText}>Register Now</Text>
                             )}
                         </Pressable>
                     </View>
@@ -211,16 +210,22 @@ const styles = StyleSheet.create({
         color: colors.text,
     },
     form: {
-        gap: spacing.lg,
-    },
-    inputGroup: {
         gap: spacing.xs,
+    },
+    sectionLabel: {
+        fontSize: fontSize.xs,
+        fontWeight: '700',
+        color: colors.textSecondary,
+        textTransform: 'uppercase',
+        marginTop: spacing.md,
+        marginBottom: spacing.sm,
+        letterSpacing: 1,
     },
     roleContainer: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: spacing.sm,
-        marginBottom: spacing.md,
+        marginBottom: spacing.lg,
     },
     roleChip: {
         paddingVertical: spacing.sm,
@@ -249,7 +254,7 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
-        marginTop: spacing.md,
+        marginTop: spacing.xl,
     },
     submitButtonText: {
         color: '#fff',
