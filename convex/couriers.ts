@@ -5,6 +5,34 @@ import { Id } from "./_generated/dataModel";
 // --- Helpers ---
 const normalizePhone = (p: string) => p.replace(/\D/g, "");
 
+async function checkAuthority(ctx: any, userId: Id<"users"> | undefined, courier: any) {
+    if (!userId) throw new Error("Authentication required");
+    const user = await ctx.db.get(userId);
+    if (!user) throw new Error("User not found");
+    
+    if (user.role === "admin") return true; // Admins have global access
+    
+    if (user.role === "branch_manager") {
+        // Manager can touch parcels if they are current, origin, or destination
+        const isCurrentBranch = courier.branchId && courier.branchId === user.branchId;
+        const isOrigin = courier.originBranch && courier.originBranch === user.branchId;
+        const isDestination = courier.destinationBranch && courier.destinationBranch === user.branchId;
+        const isUnassigned = !courier.branchId;
+        
+        if (!isCurrentBranch && !isOrigin && !isDestination && !isUnassigned) {
+            throw new Error("Security Violation: Access Denied. Parcel belongs to another branch.");
+        }
+        return true;
+    }
+    
+    if (user.role === "agent") {
+        if (courier.assignedTo !== userId) throw new Error("Access Denied: This parcel is not assigned to you.");
+        return true;
+    }
+
+    throw new Error("Unauthorized action.");
+}
+
 function calculateHaversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -33,7 +61,7 @@ function generateInvoiceNumber(): string {
 
 const BASE_RATE = 100; 
 const WEIGHT_RATE = 20; 
-const DISTANCE_RATE = 10; 
+const DISTANCE_RATE = 5; 
 
 function calculatePrice(weight?: number, distance?: number, type?: "normal" | "express") {
     let subtotal = BASE_RATE;
@@ -45,8 +73,8 @@ function calculatePrice(weight?: number, distance?: number, type?: "normal" | "e
         total += subtotal * 0.5; // 50% express surcharge
     }
     
-    // Add 12% GST
-    total += total * 0.12;
+    // Add 18% GST
+    total += total * 0.18;
     
     return Math.round(total);
 }
@@ -126,8 +154,11 @@ export const getById = query({
             } else if (user.role === "agent") {
                 if (courier.assignedTo !== args.userId && courier.branchId !== user.branchId) return null;
             } else if (user.role === "branch_manager") {
-                // NEW: Branch Manager Security
-                if (courier.branchId && courier.branchId !== user.branchId) return null;
+                // Expanded Branch Manager Security: Current, Origin, or Destination
+                const isCurrent = courier.branchId && courier.branchId === user.branchId;
+                const isOrigin = courier.originBranch && courier.originBranch === user.branchId;
+                const isDest = courier.destinationBranch && courier.destinationBranch === user.branchId;
+                if (!isCurrent && !isOrigin && !isDest) return null;
             }
         }
 
@@ -159,7 +190,13 @@ export const getById = query({
             invoice = await ctx.db.query("invoices").withIndex("by_courierId", q => q.eq("courierId", args.id)).first();
         }
 
-        return { ...courier, pod, invoice };
+        let agentName = null;
+        if (courier.assignedTo) {
+            const agent = await ctx.db.get(courier.assignedTo);
+            if (agent) agentName = agent.name;
+        }
+
+        return { ...courier, pod, invoice, agentName };
     },
 });
 
@@ -345,12 +382,15 @@ export const create = mutation({
         distance: v.optional(v.number()),
         price: v.optional(v.number()),
         branchId: v.optional(v.id("branches")),
+        originBranch: v.optional(v.id("branches")),
+        destinationBranch: v.optional(v.id("branches")),
         bookedBy: v.optional(v.id("users")),
         deliveryType: v.optional(v.union(v.literal("normal"), v.literal("express"))),
         pickupLat: v.optional(v.number()),
         pickupLng: v.optional(v.number()),
         deliveryLat: v.optional(v.number()),
         deliveryLng: v.optional(v.number()),
+        paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("prepaid"))),
     },
     handler: async (ctx, args) => {
         const now = Date.now();
@@ -375,7 +415,11 @@ export const create = mutation({
             weight: args.weight,
             distance: distance,
             price: finalPrice,
-            branchId: args.branchId,
+            paymentMethod: args.paymentMethod || "cash",
+            branchId: args.originBranch || args.branchId, // Sync with origin
+            originBranch: args.originBranch,
+            destinationBranch: args.destinationBranch,
+            currentBranch: args.originBranch || args.branchId,
             bookedBy: args.bookedBy,
             deliveryType: args.deliveryType || "normal",
             trackingId,
@@ -385,6 +429,41 @@ export const create = mutation({
             createdAt: now,
             updatedAt: now,
         });
+
+        // 1.5 Insert Created Log FIRST
+        await ctx.db.insert("logs", { 
+            courierId, trackingId, action: "created", 
+            description: `Courier created. Distance: ${distance || 0}km. Price: ₹${finalPrice}`, 
+            timestamp: now 
+        });
+
+        // 1.6 Auto-assign Agent for Pickup
+        let assignedAgentId = undefined;
+        let initialStatus: any = "booked";
+        const currentBranchValue = args.originBranch || args.branchId;
+        if (currentBranchValue) {
+            const agents = await ctx.db.query("users")
+                .withIndex("by_branchId", q => q.eq("branchId", currentBranchValue))
+                .filter(q => q.eq(q.field("role"), "agent"))
+                .collect();
+            
+            if (agents.length > 0) {
+                const randomAgent = agents[Math.floor(Math.random() * agents.length)];
+                assignedAgentId = randomAgent._id;
+                initialStatus = "pickup_assigned";
+                
+                await ctx.db.patch(courierId, {
+                    assignedTo: assignedAgentId,
+                    currentStatus: initialStatus,
+                });
+                
+                await ctx.db.insert("logs", {
+                    courierId, trackingId, action: "assigned",
+                    description: `Agent auto-assigned for pickup`,
+                    timestamp: now + 1, // Ensure this appears after 'created'
+                });
+            }
+        }
 
         // 2. Insert Invoice
         const invoiceId = await ctx.db.insert("invoices", {
@@ -397,14 +476,9 @@ export const create = mutation({
             generatedAt: now,
         });
 
-        // 3. Link Invoice back to Courier (CRITICAL FIX)
+        // 3. Link Invoice back to Courier
         await ctx.db.patch(courierId, { invoiceId });
 
-        await ctx.db.insert("logs", { 
-            courierId, trackingId, action: "created", 
-            description: `Courier created. Distance: ${distance || 0}km. Price: ₹${finalPrice}`, 
-            timestamp: now 
-        });
         return courierId;
     },
 });
@@ -450,7 +524,11 @@ export const update = mutation({
         const isMoving = !["booked", "pending", "cancelled"].includes(courier.currentStatus);
         const changingPriceFields = args.weight !== undefined || args.deliveryType !== undefined || args.distance !== undefined;
         
-        if (isMoving && changingPriceFields) {
+        // ALLOW staff (Admins/Managers) to update weight even if moving
+        const requester = userId ? await ctx.db.get(userId) : null;
+        const isStaff = requester && (requester.role === "admin" || requester.role === "branch_manager");
+
+        if (isMoving && changingPriceFields && !isStaff) {
             throw new Error(`Cannot change weight or service type once parcel is '${courier.currentStatus}'. Use 'Restoration' flow from Cancelled state if needed.`);
         }
 
@@ -486,10 +564,17 @@ export const update = mutation({
 });
 
 export const assignBranch = mutation({
-    args: { id: v.id("couriers"), branchId: v.id("branches") },
+    args: { 
+        id: v.id("couriers"), 
+        branchId: v.id("branches"),
+        userId: v.optional(v.id("users"))
+    },
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
         if (!courier) throw new Error("Not found");
+        
+        if (args.userId) await checkAuthority(ctx, args.userId, courier);
+
         await ctx.db.patch(args.id, { branchId: args.branchId, updatedAt: Date.now() });
         await ctx.db.insert("logs", { courierId: args.id, trackingId: courier.trackingId, action: "assigned", description: "Assigned to branch hub", timestamp: Date.now() });
     },
@@ -506,6 +591,10 @@ export const completeDelivery = mutation({
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
         if (!courier) throw new Error("Not found");
+        
+        // Agent security check happens implicitly via assignedTo check if we added userId,
+        // but for delivery completion, the OTP is the primary security factor.
+
         if (courier.otpCode && courier.otpCode !== args.otpCode) throw new Error("Invalid OTP");
 
         const podId = await ctx.db.insert("proofOfDelivery", {
@@ -526,6 +615,12 @@ export const completeDelivery = mutation({
         if (courier.invoiceId) {
             await ctx.db.patch(courier.invoiceId, { status: "paid" });
         }
+        
+        await ctx.db.insert("logs", {
+            courierId: args.id, trackingId: courier.trackingId, action: "status_changed",
+            description: "Delivery completed successfully",
+            timestamp: Date.now()
+        });
     },
 });
 
@@ -533,14 +628,15 @@ export const assignAgent = mutation({
     args: { 
         id: v.id("couriers"), 
         agentId: v.id("users"),
-        userId: v.optional(v.id("users")) // ID of the person performing the assignment
+        userId: v.optional(v.id("users")) 
     },
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
         if (!courier) throw new Error("Not found");
 
-        // Integrity Check: If requester is a branch manager, verify agent branch
         if (args.userId) {
+            await checkAuthority(ctx, args.userId, courier);
+            
             const requester = await ctx.db.get(args.userId);
             if (requester && requester.role === "branch_manager") {
                 const agent = await ctx.db.get(args.agentId);
@@ -564,13 +660,16 @@ export const assignAgent = mutation({
 export const updateStatus = mutation({
     args: {
         id: v.id("couriers"),
-        status: v.union(v.literal("booked"), v.literal("picked_up"), v.literal("pending"), v.literal("dispatched"), v.literal("in_transit"), v.literal("out_for_delivery"), v.literal("delivered"), v.literal("cancelled")),
+        status: v.union(v.literal("booked"), v.literal("pickup_assigned"), v.literal("picked_up"), v.literal("pending"), v.literal("dispatched"), v.literal("in_transit"), v.literal("out_for_delivery"), v.literal("delivered"), v.literal("cancelled")),
+        userId: v.optional(v.id("users")),
     },
     handler: async (ctx, args) => {
         if (args.status === "delivered") throw new Error("Use POD flow");
         
         const courier = await ctx.db.get(args.id);
         if (!courier) throw new Error("Not found");
+
+        if (args.userId) await checkAuthority(ctx, args.userId, courier);
 
         if (args.status === "cancelled") {
             const allowedStatuses = ["booked", "pending"];
@@ -585,7 +684,7 @@ export const updateStatus = mutation({
             : `Status updated to ${args.status.replace('_', ' ')}`;
 
         const patch: any = { currentStatus: args.status, updatedAt: Date.now() };
-        if (isRestoring) patch.assignedTo = undefined; // Clear agent on restoration (Item 4)
+        if (isRestoring) patch.assignedTo = undefined; 
 
         await ctx.db.patch(args.id, patch);
         
@@ -600,11 +699,28 @@ export const updateStatus = mutation({
 });
 
 export const cancelCourier = mutation({
-    args: { id: v.id("couriers") },
+    args: { 
+        id: v.id("couriers"),
+        userId: v.optional(v.id("users"))
+    },
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
         if (!courier) throw new Error("Courier not found");
         
+        // If not explicit admin/manager, check if it's the customer owner
+        if (args.userId) {
+            const user = await ctx.db.get(args.userId);
+            if (user && user.role !== "admin" && user.role !== "branch_manager") {
+                const uPhone = normalizePhone(user.phone || "");
+                const sPhone = normalizePhone(courier.senderPhone || "");
+                if (uPhone !== sPhone && courier.senderName !== user.name) {
+                    throw new Error("Access Denied: You can only cancel your own bookings.");
+                }
+            } else if (args.userId) {
+                await checkAuthority(ctx, args.userId, courier);
+            }
+        }
+
         const allowedStatuses = ["booked", "pending"];
         if (!allowedStatuses.includes(courier.currentStatus)) {
             throw new Error(`Cancellation not allowed. Parcel is already in '${courier.currentStatus}' state.`);
@@ -616,16 +732,119 @@ export const cancelCourier = mutation({
             courierId: args.id, 
             trackingId: courier.trackingId, 
             action: "status_changed", 
-            description: "Courier cancelled by user", 
+            description: "Courier cancelled", 
             timestamp: Date.now() 
         });
     },
 });
 
-export const markAsPaid = mutation({
-    args: { id: v.id("couriers") },
+export const markPickedUp = mutation({
+    args: {
+        id: v.id("couriers"),
+        agentId: v.id("users")
+    },
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Not found");
+        if (courier.assignedTo !== args.agentId) throw new Error("Not assigned to you");
+        
+        await ctx.db.patch(args.id, {
+            currentStatus: "picked_up",
+            updatedAt: Date.now()
+        });
+        
+        await ctx.db.insert("logs", {
+            courierId: args.id, trackingId: courier.trackingId, action: "status_changed",
+            description: "Parcel picked up by agent",
+            timestamp: Date.now(),
+            performedBy: args.agentId
+        });
+    }
+});
+
+export const transferToDestination = mutation({
+    args: {
+        id: v.id("couriers"),
+        managerId: v.optional(v.id("users"))
+    },
+    handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Not found");
+        if (args.managerId) await checkAuthority(ctx, args.managerId, courier);
+        
+        await ctx.db.patch(args.id, {
+            currentBranch: courier.destinationBranch,
+            branchId: courier.destinationBranch, // Keep legacy in sync
+            assignedTo: undefined,
+            currentStatus: "in_transit",
+            updatedAt: Date.now()
+        });
+        
+        await ctx.db.insert("logs", {
+            courierId: args.id, trackingId: courier.trackingId, action: "status_changed",
+            description: "Parcel transferred to destination branch hub",
+            timestamp: Date.now(),
+            performedBy: args.managerId
+        });
+    }
+});
+
+export const arriveAtDestinationHub = mutation({
+    args: {
+        id: v.id("couriers"),
+        managerId: v.optional(v.id("users"))
+    },
+    handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) throw new Error("Not found");
+        if (args.managerId) await checkAuthority(ctx, args.managerId, courier);
+        
+        const destination = courier.destinationBranch || courier.currentBranch;
+        if (!destination) throw new Error("No destination branch set");
+        
+        let assignedAgentId = undefined;
+        let status = "dispatched"; // Or pending assignment if no agent
+        
+        const agents = await ctx.db.query("users")
+            .withIndex("by_branchId", q => q.eq("branchId", destination))
+            .filter(q => q.eq(q.field("role"), "agent"))
+            .collect();
+            
+        if (agents.length > 0) {
+            const randomAgent = agents[Math.floor(Math.random() * agents.length)];
+            assignedAgentId = randomAgent._id;
+            status = "out_for_delivery";
+        }
+        
+        await ctx.db.patch(args.id, {
+            currentStatus: status as any,
+            assignedTo: assignedAgentId,
+            updatedAt: Date.now()
+        });
+        
+        await ctx.db.insert("logs", {
+            courierId: args.id, trackingId: courier.trackingId, action: "status_changed",
+            description: assignedAgentId ? "Parcel arrived at hub. Auto-assigned out for delivery" : "Parcel arrived at hub. Awaiting agent assignment",
+            timestamp: Date.now(),
+            performedBy: args.managerId
+        });
+        if (assignedAgentId) {
+            await ctx.db.insert("logs", {
+                courierId: args.id, trackingId: courier.trackingId, action: "assigned",
+                description: `Agent auto-assigned for delivery`,
+                timestamp: Date.now()
+            });
+        }
+    }
+});
+
+export const markAsPaid = mutation({
+    args: { id: v.id("couriers"), userId: v.optional(v.id("users")) },
+    handler: async (ctx, args) => {
+        const courier = await ctx.db.get(args.id);
+        if (!courier) return;
+        if (args.userId) await checkAuthority(ctx, args.userId, courier);
+
         await ctx.db.patch(args.id, { paymentStatus: "paid", updatedAt: Date.now() });
         if (courier?.invoiceId) await ctx.db.patch(courier.invoiceId, { status: "paid" });
     },
@@ -654,7 +873,7 @@ export const getLogs = query({
 });
 
 export const removeMultiple = mutation({
-    args: { ids: v.array(v.id("couriers")) },
+    args: { ids: v.array(v.id("couriers")), userId: v.optional(v.id("users")) },
     handler: async (ctx, args) => {
         const advancedStatuses = ["picked_up", "dispatched", "in_transit", "out_for_delivery", "delivered"];
         
@@ -662,11 +881,12 @@ export const removeMultiple = mutation({
             const courier = await ctx.db.get(id);
             if (!courier) continue;
 
+            if (args.userId) await checkAuthority(ctx, args.userId, courier);
+
             if (advancedStatuses.includes(courier.currentStatus)) {
                 throw new Error(`Cannot delete tracking ID ${courier.trackingId}. It is already in '${courier.currentStatus}' state.`);
             }
             
-            // Item 2: Delete associated records (Logs, Invoices, POD)
             const logs = await ctx.db.query("logs").withIndex("by_courierId", q => q.eq("courierId", id)).collect();
             for (const log of logs) await ctx.db.delete(log._id);
 
@@ -681,12 +901,13 @@ export const removeMultiple = mutation({
 });
 
 export const remove = mutation({
-    args: { id: v.id("couriers") },
+    args: { id: v.id("couriers"), userId: v.optional(v.id("users")) },
     handler: async (ctx, args) => {
         const courier = await ctx.db.get(args.id);
         if (!courier) return;
 
-        // Cleanup associated records (Item 2)
+        if (args.userId) await checkAuthority(ctx, args.userId, courier);
+
         const logs = await ctx.db.query("logs").withIndex("by_courierId", q => q.eq("courierId", args.id)).collect();
         for (const log of logs) await ctx.db.delete(log._id);
 

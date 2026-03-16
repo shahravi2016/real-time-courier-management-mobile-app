@@ -1,15 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import { View, FlatList, TextInput, StyleSheet, Pressable, Text, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { useQuery, useMutation } from 'convex/react';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { api } from '../../convex/_generated/api';
-import { CourierCard, LoadingState, EmptyState } from '../../src/components';
+import { CourierCard, LoadingState, EmptyState, CourierSkeleton } from '../../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/components/auth-context';
+import { useSafeNavigation } from '../../src/utils/navigation';
 import { Id } from '../../convex/_generated/dataModel';
 
 type CourierStatus =
@@ -41,7 +42,7 @@ const customerFilters: { label: string; value: string }[] = [
 ];
 
 export default function CourierListScreen() {
-    const router = useRouter();
+    const router = useSafeNavigation();
     const params = useLocalSearchParams();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedFilter, setSelectedFilter] = useState<string>(params.filter === 'needs_attention' ? 'unassigned' : 'all');
@@ -158,12 +159,15 @@ export default function CourierListScreen() {
                     style: "destructive", 
                     onPress: async () => {
                         try {
-                            await removeMultiple({ ids: Array.from(selectedIds) });
+                            await removeMultiple({ 
+                                ids: Array.from(selectedIds),
+                                userId: user?._id as Id<'users'>
+                            });
                             setSelectedIds(new Set());
                             setIsSelectionMode(false);
                             Alert.alert("Success", "Selected items deleted.");
                         } catch (e: any) {
-                            Alert.alert("Integrity Error", e.message);
+                            Alert.alert("Security Error", e.message);
                         }
                     }
                 }
@@ -225,9 +229,18 @@ export default function CourierListScreen() {
 
     if (!couriers) {
         return (
-            <SafeAreaView style={globalStyles.safeArea} edges={['bottom']}>
-                <Stack.Screen options={{ title: 'Couriers' }} />
-                <LoadingState message="Loading couriers..." />
+            <SafeAreaView style={globalStyles.safeArea}>
+                <Stack.Screen options={{ headerShown: false }} />
+                <View style={styles.header}>
+                    <Pressable onPress={() => router.back()} style={styles.backButtonContainer}>
+                        <Ionicons name="arrow-back" size={24} color={colors.text} />
+                    </Pressable>
+                    <Text style={globalStyles.title}>Couriers</Text>
+                    <View style={{ width: 44 }} />
+                </View>
+                <View style={styles.container}>
+                    {[1, 2, 3, 4, 5].map(i => <CourierSkeleton key={i} />)}
+                </View>
             </SafeAreaView>
         );
     }
@@ -243,7 +256,7 @@ export default function CourierListScreen() {
                             setIsSelectionMode(false);
                             setSelectedIds(new Set());
                         } else {
-                            router.canGoBack() ? router.back() : router.replace('/');
+                            router.back();
                         }
                     }}
                     style={({ pressed }) => [

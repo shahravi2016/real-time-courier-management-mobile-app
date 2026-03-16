@@ -110,6 +110,7 @@ export const updateProfile = mutation({
         name: v.string(),
         phone: v.optional(v.string()),
         password: v.optional(v.string()),
+        callerId: v.optional(v.id("users")),
     },
     handler: async (ctx, args) => {
         const user = await ctx.db.get(args.id);
@@ -123,6 +124,12 @@ export const updateProfile = mutation({
         };
 
         if (args.password) {
+            // Check if caller is admin
+            if (!args.callerId) throw new Error("Unauthorized to change password");
+            const caller = await ctx.db.get(args.callerId);
+            if (!caller || caller.role !== "admin") {
+                throw new Error("Only admins can change account passwords");
+            }
             updates.password = args.password;
         }
 
@@ -152,11 +159,20 @@ export const updateManager = mutation({
         email: v.optional(v.string()),
         password: v.optional(v.string()),
         branchId: v.optional(v.id("branches")),
+        callerId: v.optional(v.id("users")),
     },
     handler: async (ctx, args) => {
-        const { id, ...updates } = args;
+        const { id, callerId, ...updates } = args;
         const user = await ctx.db.get(id);
         if (!user) throw new Error("User not found");
+
+        if (updates.password) {
+            if (!callerId) throw new Error("Unauthorized");
+            const caller = await ctx.db.get(callerId);
+            if (!caller || caller.role !== "admin") {
+                throw new Error("Only admins can change passwords");
+            }
+        }
 
         // If email is being changed, check for duplicates
         if (updates.email && updates.email !== user.email) {
@@ -189,11 +205,20 @@ export const updateAgent = mutation({
         email: v.optional(v.string()),
         password: v.optional(v.string()),
         branchId: v.optional(v.id("branches")),
+        callerId: v.optional(v.id("users")),
     },
     handler: async (ctx, args) => {
-        const { id, ...updates } = args;
+        const { id, callerId, ...updates } = args;
         const user = await ctx.db.get(id);
         if (!user) throw new Error("User not found");
+
+        if (updates.password) {
+            if (!callerId) throw new Error("Unauthorized");
+            const caller = await ctx.db.get(callerId);
+            if (!caller || caller.role !== "admin") {
+                throw new Error("Only admins can change passwords");
+            }
+        }
 
         if (updates.email && updates.email !== user.email) {
             const existing = await ctx.db

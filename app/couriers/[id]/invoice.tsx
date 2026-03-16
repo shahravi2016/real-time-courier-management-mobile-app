@@ -24,13 +24,15 @@ export default function InvoiceScreen() {
     });
     const markAsPaid = useMutation(api.couriers.markAsPaid);
     const [isUpdating, setIsUpdating] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
+    const [isSharing, setIsSharing] = useState(false);
 
     if (!courier) return <LoadingState message="Loading invoice..." />;
 
     // Pricing Constants (Should match convex/couriers.ts)
     const BASE_RATE = 100; 
     const WEIGHT_RATE = 20; 
-    const DISTANCE_RATE = 10; 
+    const DISTANCE_RATE = 5; 
 
     const weightCharge = (courier.weight || 0) * WEIGHT_RATE;
     const distanceCharge = (courier.distance || 0) * DISTANCE_RATE;
@@ -40,7 +42,7 @@ export default function InvoiceScreen() {
     const expressSurcharge = isExpress ? subtotal * 0.5 : 0;
     
     const taxableAmount = subtotal + expressSurcharge;
-    const gstAmount = taxableAmount * 0.12; // 12% GST
+    const gstAmount = taxableAmount * 0.18; // 18% GST (Updated)
     const totalAmount = taxableAmount + gstAmount;
 
     const handleMarkAsPaid = async () => {
@@ -178,7 +180,7 @@ export default function InvoiceScreen() {
                                     <span>₹${taxableAmount.toFixed(2)}</span>
                                 </div>
                                 <div class="summary-row gst-row">
-                                    <span>GST (12%)</span>
+                                    <span>GST (18%)</span>
                                     <span>₹${gstAmount.toFixed(2)}</span>
                                 </div>
                                 <div class="summary-row total">
@@ -199,6 +201,7 @@ export default function InvoiceScreen() {
     };
 
     const handleShare = async () => {
+        setIsSharing(true);
         try {
             const html = generateHtml();
             const { uri } = await Print.printToFileAsync({ html });
@@ -210,21 +213,55 @@ export default function InvoiceScreen() {
         } catch (error) {
             console.error('Share error:', error);
             Alert.alert('Error', 'Failed to share invoice');
+        } finally {
+            setIsSharing(true);
         }
     };
 
     const handleDownload = async () => {
+        setIsDownloading(true);
         try {
             const html = generateHtml();
             const { uri } = await Print.printToFileAsync({ html });
-            await Sharing.shareAsync(uri, {
-                UTI: '.pdf',
-                mimeType: 'application/pdf',
-                dialogTitle: `Download-Invoice-${courier.trackingId}`
-            });
+            
+            if (Platform.OS === 'android') {
+                // @ts-ignore
+                const saf = FileSystem.StorageAccessFramework;
+                if (saf) {
+                    const permissions = await saf.requestDirectoryPermissionsAsync();
+                    if (permissions.granted) {
+                        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+                        const fileName = `Invoice-${courier.trackingId}.pdf`;
+                        const savedUri = await saf.createFileAsync(
+                            permissions.directoryUri, 
+                            fileName, 
+                            'application/pdf'
+                        );
+                        await FileSystem.writeAsStringAsync(savedUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+                        Alert.alert('Success', `Invoice saved as ${fileName}`);
+                    }
+                } else {
+                    // Fallback to sharing if SAF is unavailable
+                    await Sharing.shareAsync(uri, {
+                        UTI: '.pdf',
+                        mimeType: 'application/pdf',
+                        dialogTitle: `Download-Invoice-${courier.trackingId}`
+                    });
+                }
+            } else if (Platform.OS === 'web') {
+                await Print.printAsync({ html });
+            } else {
+                await Sharing.shareAsync(uri, {
+                    UTI: '.pdf',
+                    mimeType: 'application/pdf',
+                    dialogTitle: `Download-Invoice-${courier.trackingId}`
+                });
+            }
         } catch (error) {
             console.error('Download error:', error);
-            Alert.alert('Error', 'Failed to prepare download');
+            Alert.alert('Error', 'Failed to process download');
+        } finally {
+            setIsDownloading(false);
         }
     };
 
@@ -238,11 +275,11 @@ export default function InvoiceScreen() {
                     <Text style={[globalStyles.subtitle, { marginLeft: spacing.sm }]}>Invoice</Text>
                 </Pressable>
                 <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-                    <Pressable onPress={handleDownload} style={styles.actionButton}>
-                        <Ionicons name="download-outline" size={22} color={colors.text} />
+                    <Pressable onPress={handleDownload} disabled={isDownloading} style={[styles.actionButton, isDownloading && { opacity: 0.5 }]}>
+                        <Ionicons name={isDownloading ? "hourglass-outline" : "cloud-download-outline"} size={22} color={colors.text} />
                     </Pressable>
-                    <Pressable onPress={handleShare} style={styles.actionButton}>
-                        <Ionicons name="share-outline" size={22} color={colors.text} />
+                    <Pressable onPress={handleShare} disabled={isSharing} style={[styles.actionButton, isSharing && { opacity: 0.5 }]}>
+                        <Ionicons name={isSharing ? "hourglass-outline" : "share-social"} size={22} color={colors.text} />
                     </Pressable>
                 </View>
             </View>
@@ -319,7 +356,7 @@ export default function InvoiceScreen() {
                                 <Text style={styles.summaryValue}>₹{taxableAmount.toFixed(2)}</Text>
                             </View>
                             <View style={styles.summaryRow}>
-                                <Text style={styles.summaryLabel}>GST (12%)</Text>
+                                <Text style={styles.summaryLabel}>GST (18%)</Text>
                                 <Text style={styles.summaryValue}>₹{gstAmount.toFixed(2)}</Text>
                             </View>
                             <View style={[styles.summaryRow, styles.totalRow]}>

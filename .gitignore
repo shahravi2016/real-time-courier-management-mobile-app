@@ -35,6 +35,7 @@ yarn-error.*
 .env
 /.idea
 /image.png
+gemini-conversation-1773160159649.json
 /image-33.jpeg
 solve-error.md
 next-goal.md

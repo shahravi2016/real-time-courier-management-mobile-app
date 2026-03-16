@@ -15,7 +15,6 @@ function RootNavigator() {
     const segments = useSegments();
 
     useEffect(() => {
-        // Wait for auth to finish loading before deciding where to go
         if (isLoading) return;
 
         const inAuthGroup = segments[0] === 'auth';
@@ -31,6 +30,12 @@ function RootNavigator() {
 
     if (isLoading) {
         return <LoadingState message="Restoring session..." />;
+    }
+
+    // Protection for individual routes: Do not render protected screens if user is not present
+    const inAuthGroup = segments[0] === 'auth';
+    if (!user && !inAuthGroup) {
+        return <LoadingState message="Redirecting to login..." />;
     }
 
     return (

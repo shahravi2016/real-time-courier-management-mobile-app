@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, Alert, Platform, TextInput, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Stack } from 'expo-router';
+import { Stack } from 'expo-router';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../convex/_generated/api';
 import { StatCard, LoadingState, ErrorState, Logo, AnalyticsChart } from '../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../src/styles/theme';
 import { useAuth } from '../src/components/auth-context';
+import { useSafeNavigation } from '../src/utils/navigation';
 import { Ionicons } from '@expo/vector-icons';
 import { validateEmail, validateName, validatePhone, showAlert } from '../src/utils/validation';
 
@@ -18,7 +19,7 @@ function getGreeting(): string {
 }
 
 export default function DashboardScreen() {
-    const router = useRouter();
+    const router = useSafeNavigation();
     const { user, logout, isLoading: authLoading } = useAuth();
     const isAdmin = user?.role === 'admin';
     const isBranchManager = user?.role === 'branch_manager';
@@ -103,7 +104,7 @@ export default function DashboardScreen() {
     const [editAgentBranchId, setEditAgentBranchId] = useState('');
 
     const handleUpdateManagerProfile = async () => {
-        if (!selectedManager || !editMgrName || !editMgrEmail || !editMgrPassword || !editMgrBranchId) {
+        if (!selectedManager || !editMgrName || !editMgrEmail || !editMgrPassword || !editMgrBranchId || !user?._id) {
             showAlert('Validation Error', 'All fields are required.');
             return;
         }
@@ -127,6 +128,7 @@ export default function DashboardScreen() {
                 email: editMgrEmail.trim(),
                 password: editMgrPassword,
                 branchId: editMgrBranchId as any,
+                callerId: user._id as any,
             });
             setIsEditingManagerProfile(false);
             setShowManagerDetailModal(false);
@@ -139,7 +141,7 @@ export default function DashboardScreen() {
     };
 
     const handleUpdateAgentProfile = async () => {
-        if (!selectedAgent || !editAgentName || !editAgentEmail || !editAgentPassword) {
+        if (!selectedAgent || !editAgentName || !editAgentEmail || !editAgentPassword || !user?._id) {
             showAlert('Validation Error', 'Name, Email and Password are required.');
             return;
         }
@@ -163,6 +165,7 @@ export default function DashboardScreen() {
                 email: editAgentEmail.trim(),
                 password: editAgentPassword,
                 branchId: editAgentBranchId ? editAgentBranchId as any : undefined,
+                callerId: user._id as any,
             });
             setIsEditingAgentProfile(false);
             setShowAgentDetailModal(false);
@@ -448,9 +451,14 @@ export default function DashboardScreen() {
         );
     }
 
-    // If auth is done but user is gone, useEffect handles redirect.
-    // If user is here but stats still loading, show loading dash.
-    if (!user || (!stats && !adminDashboardStats && !branchDashboardStats && !agentStats && !customerStats)) {
+    // Determine if we are still waiting for role-specific data
+    const isDataLoading = 
+        (isAdmin && (!stats || !adminDashboardStats)) ||
+        (isBranchManager && (!stats || !branchDashboardStats)) ||
+        (isAgent && (!agentStats || !myCouriers)) ||
+        (isCustomer && (!customerStats || !myCouriers));
+
+    if (!user || isDataLoading) {
         return (
             <SafeAreaView style={globalStyles.safeArea}>
                 <Stack.Screen options={{ headerShown: false }} />
@@ -463,7 +471,11 @@ export default function DashboardScreen() {
     return (
         <SafeAreaView style={globalStyles.safeArea}>
             <Stack.Screen options={{ headerShown: false }} />
-            <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+            <ScrollView 
+                style={styles.container} 
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+            >
                 {/* Header */}
                 <View style={styles.header}>
                     <View style={styles.headerInfo}>
@@ -473,9 +485,9 @@ export default function DashboardScreen() {
                             <Text style={globalStyles.title}>
                                 {isAdmin ? 'Admin Console' : isBranchManager ? 'Branch Hub' : isAgent ? 'Agent Console' : 'Customer Console'}
                             </Text>
-                            {isBranchManager && (
+                            {(isBranchManager || isAgent) && (
                                 <Text style={styles.branchSubtext}>
-                                    Managing: {branches?.find(b => b._id === user?.branchId)?.name || 'Loading branch...'}
+                                    {isBranchManager ? 'Managing' : 'Branch'}: {branches?.find(b => b._id === user?.branchId)?.name || 'Loading branch...'}
                                 </Text>
                             )}
                         </View>
@@ -1195,7 +1207,11 @@ export default function DashboardScreen() {
                             </View>
                         </View>
                         
-                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: spacing.xl }}>
+                        <ScrollView 
+                            showsVerticalScrollIndicator={false} 
+                            contentContainerStyle={{ paddingBottom: spacing.xl }}
+                            keyboardShouldPersistTaps="handled"
+                        >
                             <View style={styles.detailItem}>
                                 <Text style={styles.detailLabel}>Full Name</Text>
                                 {isEditingManagerProfile ? (
@@ -1325,7 +1341,11 @@ export default function DashboardScreen() {
                             </View>
                         </View>
                         
-                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: spacing.xl }}>
+                        <ScrollView 
+                            showsVerticalScrollIndicator={false} 
+                            contentContainerStyle={{ paddingBottom: spacing.xl }}
+                            keyboardShouldPersistTaps="handled"
+                        >
                             <View style={styles.detailItem}>
                                 <Text style={styles.detailLabel}>Full Name</Text>
                                 {isEditingAgentProfile ? (
@@ -1457,7 +1477,11 @@ export default function DashboardScreen() {
                             </Pressable>
                         </View>
                         
-                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: spacing.xl }}>
+                        <ScrollView 
+                            showsVerticalScrollIndicator={false} 
+                            contentContainerStyle={{ paddingBottom: spacing.xl }}
+                            keyboardShouldPersistTaps="handled"
+                        >
                             <View style={styles.inputGroup}>
                                 <Text style={styles.inputLabel}>Branch Name</Text>
                                 <TextInput

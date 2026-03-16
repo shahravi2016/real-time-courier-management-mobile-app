@@ -6,9 +6,11 @@ import { colors, borderRadius } from '../styles/theme';
 interface SignaturePadProps {
     onOK: (signature: string) => void;
     onEmpty?: () => void;
+    onBegin?: () => void;
+    onEnd?: () => void;
 }
 
-export const SignaturePad = ({ onOK, onEmpty }: SignaturePadProps) => {
+export const SignaturePad = ({ onOK, onEmpty, onBegin, onEnd }: SignaturePadProps) => {
     const ref = useRef<SignatureViewRef>(null);
 
     const handleOK = (signature: string) => {
@@ -34,20 +36,22 @@ export const SignaturePad = ({ onOK, onEmpty }: SignaturePadProps) => {
                     ref={ref}
                     onOK={handleOK}
                     onEmpty={handleEmpty}
+                    onBegin={onBegin}
+                    onEnd={onEnd}
                     autoClear={false}
+                    scrollable={false}
                     imageType="image/png"
                     backgroundColor="#FFFFFF"
                     penColor="#000000"
                     minWidth={2}
                     maxWidth={4}
                     style={{ backgroundColor: '#FFFFFF', flex: 1 }}
-                    containerStyle={{ backgroundColor: '#FFFFFF', flex: 1 }}
                     webStyle={`
                         .m-signature-pad { background-color: #FFFFFF !important; border: none !important; box-shadow: none !important; }
-                        .m-signature-pad--body { background-color: #FFFFFF !important; border: none !important; }
-                        canvas { background-color: #FFFFFF !important; }
+                        .m-signature-pad--body { background-color: #FFFFFF !important; border: none !important; position: relative; }
+                        canvas { background-color: #FFFFFF !important; touch-action: none; }
                         .m-signature-pad--footer { display: none !important; }
-                        body, html { background-color: #FFFFFF !important; }
+                        body, html { background-color: #FFFFFF !important; touch-action: none; overscroll-behavior: none; }
                     `}
                 />
             </View>

@@ -11,6 +11,7 @@
 import type * as auth from "../auth.js";
 import type * as branches from "../branches.js";
 import type * as couriers from "../couriers.js";
+import type * as migration from "../migration.js";
 import type * as users from "../users.js";
 
 import type {
@@ -23,6 +24,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   branches: typeof branches;
   couriers: typeof couriers;
+  migration: typeof migration;
   users: typeof users;
 }>;
 

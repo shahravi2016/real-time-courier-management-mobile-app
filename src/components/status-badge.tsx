@@ -4,6 +4,7 @@ import { colors, spacing, fontSize } from '../styles/theme';
 
 type CourierStatus =
     | 'booked'
+    | 'pickup_assigned'
     | 'pending'
     | 'picked_up'
     | 'dispatched'
@@ -19,7 +20,8 @@ interface StatusBadgeProps {
 
 const statusConfig: Record<CourierStatus, { label: string; color: string }> = {
     booked: { label: 'Booked', color: colors.pending },
-    pending: { label: 'Pending', color: colors.pending },
+    pickup_assigned: { label: 'Pickup Assigned', color: colors.info },
+    pending: { label: 'Arrived at Hub', color: colors.pending },
     picked_up: { label: 'Picked Up', color: colors.pickedUp },
     dispatched: { label: 'Dispatched', color: colors.info },
     in_transit: { label: 'In Transit', color: colors.inTransit },

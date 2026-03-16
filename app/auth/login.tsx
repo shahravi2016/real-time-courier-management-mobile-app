@@ -1,18 +1,19 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Alert, TextInput, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import { useConvex } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 import { useAuth } from '../../src/components/auth-context';
+import { useSafeNavigation } from '../../src/utils/navigation';
 import { Logo } from '../../src/components';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function LoginScreen() {
     const convex = useConvex();
     const { login } = useAuth();
-    const router = useRouter();
+    const router = useSafeNavigation();
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -224,3 +225,4 @@ const styles = StyleSheet.create({
         marginTop: spacing.xs,
     },
 });
+

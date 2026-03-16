@@ -1,29 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { View, ScrollView, StyleSheet, Pressable, Text, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Stack } from 'expo-router';
+import { Stack } from 'expo-router';
 import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
 import { FormInput } from '../../src/components';
-import { validateName, validatePhone, showAlert } from '../../src/utils/validation';
+import { validateName, validatePhone } from '../../src/utils/validation';
 import { colors, spacing, globalStyles, fontSize } from '../../src/styles/theme';
 import { useAuth } from '../../src/components/auth-context';
+import { useSafeNavigation } from '../../src/utils/navigation';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function SettingsScreen() {
-    const router = useRouter();
+    const router = useSafeNavigation();
     const { user, updateUser } = useAuth();
 
     if (!user) return null;
 
-    const isAdmin = user.role === 'admin';
     const isRestricted = user.role === 'agent' || user.role === 'branch_manager';
 
     const updateProfile = useMutation(api.users.updateProfile);
 
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [showPassword, setShowPassword] = useState(false);
     const [form, setForm] = useState({
         name: user.name || '',
         phone: user.phone || '',
@@ -57,11 +56,12 @@ export default function SettingsScreen() {
             newErrors.name = 'Full name must be at least 3 characters';
         }
 
-        if (!form.phone.trim() || form.phone.length < 10) {
-            newErrors.phone = 'Please enter a valid 10-digit phone number';
+        const phoneValid = validatePhone(form.phone);
+        if (!phoneValid.isValid) {
+            newErrors.phone = phoneValid.message!;
         }
 
-        if (isAdmin && form.password && form.password.length < 6) {
+        if (form.password && form.password.length < 6) {
             newErrors.password = 'New password must be at least 6 characters';
         }
         
@@ -81,7 +81,8 @@ export default function SettingsScreen() {
                 id: user._id as Id<'users'>,
                 name: updatedName,
                 phone: updatedPhone,
-                password: (isAdmin && form.password) ? form.password : undefined,
+                password: form.password ? form.password : undefined,
+                callerId: user._id as Id<'users'>,
             });
 
             await updateUser({
@@ -90,7 +91,7 @@ export default function SettingsScreen() {
             });
 
             Alert.alert('Success', 'Profile updated successfully', [
-                { text: 'OK', onPress: () => router.canGoBack() ? router.back() : router.replace('/') },
+                { text: 'OK', onPress: () => router.back() },
             ]);
         } catch (error: any) {
             Alert.alert('Error', error.message || 'Failed to update profile.');
@@ -104,7 +105,7 @@ export default function SettingsScreen() {
             <Stack.Screen options={{ headerShown: false }} />
             
             <View style={styles.header}>
-                <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.backButton}>
+                <Pressable onPress={() => router.back()} style={styles.backButton}>
                     <Ionicons name="arrow-back" size={24} color={colors.text} />
                 </Pressable>
                 <Text style={styles.headerTitle}>Profile Settings</Text>
@@ -115,7 +116,11 @@ export default function SettingsScreen() {
                 style={{ flex: 1 }}
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
-                <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+                <ScrollView 
+                    style={styles.container} 
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                >
                     <View style={styles.card}>
                         <View style={styles.avatarContainer}>
                             <View style={styles.avatar}>
@@ -166,35 +171,15 @@ export default function SettingsScreen() {
                             maxLength={10}
                         />
 
-                        {!isAdmin && (
-                            <View style={styles.inputContainer}>
-                                <Text style={styles.inputLabel}>Your Password</Text>
-                                <View style={[styles.readOnlyInput, styles.lockedInput]}>
-                                    <Text style={styles.readOnlyText}>
-                                        {showPassword ? (user.password || 'N/A') : '••••••••••••'}
-                                    </Text>
-                                    <Pressable onPress={() => setShowPassword(!showPassword)}>
-                                        <Ionicons 
-                                            name={showPassword ? "eye-off-outline" : "eye-outline"} 
-                                            size={20} 
-                                            color={colors.primary} 
-                                        />
-                                    </Pressable>
-                                </View>
-                                <Text style={styles.helperText}>Only Admin can reset this password.</Text>
-                            </View>
-                        )}
-
-                        {isAdmin && (
-                            <FormInput
-                                label="Update Password (Optional)"
-                                value={form.password}
-                                onChangeText={(val) => updateField('password', val)}
-                                placeholder="Enter new password"
-                                secureTextEntry
-                                error={errors.password}
-                            />
-                        )}
+                        <FormInput
+                            label="Change Password"
+                            value={form.password}
+                            onChangeText={(val) => updateField('password', val)}
+                            placeholder="Leave blank to keep current"
+                            secureTextEntry
+                            error={errors.password}
+                        />
+                        <Text style={styles.helperText}>Password must be at least 6 characters.</Text>
 
                         <Pressable
                             style={({ pressed }) => [

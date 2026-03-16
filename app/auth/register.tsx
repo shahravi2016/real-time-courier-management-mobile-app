@@ -7,6 +7,7 @@ import { api } from '../../convex/_generated/api';
 import { FormInput } from '../../src/components';
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeNavigation } from '../../src/utils/navigation';
 import { validateEmail, validateName, validatePhone } from '../../src/utils/validation';
 
 const ROLES = [
@@ -14,7 +15,7 @@ const ROLES = [
 ] as const;
 
 export default function RegisterScreen() {
-    const router = useRouter();
+    const router = useSafeNavigation();
     const register = useMutation(api.auth.register);
 
     const [form, setForm] = useState({
@@ -100,7 +101,11 @@ export default function RegisterScreen() {
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 style={{ flex: 1 }}
             >
-                <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+                <ScrollView 
+                    contentContainerStyle={styles.container} 
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                >
                     <View style={styles.form}>
                         <FormInput
                             label="Full Name"

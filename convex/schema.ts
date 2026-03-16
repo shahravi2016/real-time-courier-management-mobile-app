@@ -12,6 +12,7 @@ export default defineSchema({
         deliveryAddress: v.string(),
         currentStatus: v.union(
             v.literal("booked"),
+            v.literal("pickup_assigned"),
             v.literal("pending"),
             v.literal("picked_up"),
             v.literal("dispatched"),
@@ -32,7 +33,10 @@ export default defineSchema({
         paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("prepaid"))),
 
         assignedTo: v.optional(v.id("users")), // Agent ID
-        branchId: v.optional(v.id("branches")), // Branch ID
+        branchId: v.optional(v.id("branches")), // Current Branch ID
+        originBranch: v.optional(v.id("branches")),
+        destinationBranch: v.optional(v.id("branches")),
+        currentBranch: v.optional(v.id("branches")),
         otpCode: v.optional(v.string()), // 4-digit OTP for delivery
         bookedBy: v.optional(v.id("users")), // User ID who booked
 

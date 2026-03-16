@@ -3,6 +3,7 @@ export { CourierCard } from './courier-card';
 export { StatCard } from './stat-card';
 export { FormInput } from './form-input';
 export { LoadingState, ErrorState, EmptyState } from './state-views';
+export { CourierSkeleton } from './skeleton';
 export * from './activity-log';
 export { AuthProvider, useAuth } from './auth-context';
 export { SignaturePad } from './signature-pad';

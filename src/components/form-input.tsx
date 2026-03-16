@@ -15,6 +15,7 @@ interface FormInputProps {
     icon?: keyof typeof Ionicons.prototype.name | any;
     onPress?: () => void;
     editable?: boolean;
+    autoFocus?: boolean;
 }
 
 export function FormInput({
@@ -29,6 +30,7 @@ export function FormInput({
     icon,
     onPress,
     editable = true,
+    autoFocus = false,
 }: FormInputProps) {
     const InputComponent = onPress ? Pressable : View;
 
@@ -56,6 +58,7 @@ export function FormInput({
                     maxLength={maxLength}
                     editable={editable && !onPress}
                     pointerEvents={onPress ? 'none' : 'auto'}
+                    autoFocus={autoFocus}
                 />
                 {icon && (
                     <View style={styles.iconContainer}>

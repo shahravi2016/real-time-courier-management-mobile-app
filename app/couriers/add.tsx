@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, Pressable, Text, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Stack } from 'expo-router';
+import { Stack } from 'expo-router';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { FormInput, LoadingState } from '../../src/components';
@@ -9,10 +9,11 @@ import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme'
 import { Ionicons } from '@expo/vector-icons';
 import { Id } from '../../convex/_generated/dataModel';
 import { useAuth } from '../../src/components/auth-context';
+import { useSafeNavigation } from '../../src/utils/navigation';
 import * as Location from 'expo-location';
 
 export default function AddCourierScreen() {
-    const router = useRouter();
+    const router = useSafeNavigation();
     const { user } = useAuth();
     
     const isAdmin = user?.role === 'admin';
@@ -37,7 +38,8 @@ export default function AddCourierScreen() {
         distance: '',
         paymentMethod: 'cash' as 'cash' | 'card' | 'prepaid',
         deliveryType: 'normal' as 'normal' | 'express',
-        branchId: '' as string,
+        originBranch: '' as string,
+        destinationBranch: '' as string,
     });
 
     const [errors, setErrors] = useState<Record<string, string>>({});
@@ -162,7 +164,8 @@ export default function AddCourierScreen() {
         if (!form.receiverPhone.trim() || form.receiverPhone.length < 10) newErrors.receiverPhone = 'Valid 10-digit phone is required';
         if (!form.pickupAddress.trim()) newErrors.pickupAddress = 'Pickup point is required';
         if (!form.deliveryAddress.trim()) newErrors.deliveryAddress = 'Delivery destination is required';
-        if (!form.branchId) newErrors.branchId = 'Please select a service hub';
+        if (!form.originBranch) newErrors.originBranch = 'Please select a pickup hub';
+        if (!form.destinationBranch) newErrors.destinationBranch = 'Please select a destination hub';
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
@@ -199,8 +202,10 @@ export default function AddCourierScreen() {
                 notes: form.notes.trim() || undefined,
                 weight: cleanNum(form.weight),
                 distance: cleanNum(form.distance),
-                branchId: form.branchId as Id<'branches'>,
+                originBranch: form.originBranch as Id<'branches'>,
+                destinationBranch: form.destinationBranch as Id<'branches'>,
                 deliveryType: form.deliveryType,
+                paymentMethod: form.paymentMethod as 'cash' | 'card' | 'prepaid',
                 bookedBy: user?._id as Id<'users'>,
                 pickupLat: resolvedCoords.pickup?.lat,
                 pickupLng: resolvedCoords.pickup?.lng,
@@ -240,7 +245,11 @@ export default function AddCourierScreen() {
             </View>
 
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-                <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+                <ScrollView 
+                    style={styles.container} 
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                >
                     
                     <Text style={styles.sectionTitle}>Recipient Details</Text>
                     <FormInput
@@ -296,21 +305,37 @@ export default function AddCourierScreen() {
                         error={errors.deliveryAddress}
                     />
 
-                    <Text style={styles.sectionTitle}>Select Pickup Hub (Nearest to you)</Text>
+                    <Text style={styles.sectionTitle}>Origin Hub (Nearest to pickup)</Text>
                     <View style={styles.branchGrid}>
                         {branches?.map((branch) => (
                             <Pressable
                                 key={branch._id}
-                                style={[styles.branchChip, form.branchId === branch._id && styles.branchChipActive, errors.branchId && { borderColor: colors.error }]}
-                                onPress={() => updateField('branchId', branch._id)}
+                                style={[styles.branchChip, form.originBranch === branch._id && styles.branchChipActive, errors.originBranch && { borderColor: colors.error }]}
+                                onPress={() => updateField('originBranch', branch._id)}
                             >
-                                <Text style={[styles.branchChipText, form.branchId === branch._id && { color: '#fff' }]}>
+                                <Text style={[styles.branchChipText, form.originBranch === branch._id && { color: '#fff' }]}>
                                     {branch.name}
                                 </Text>
                             </Pressable>
                         ))}
                     </View>
-                    {errors.branchId && <Text style={styles.errorText}>{errors.branchId}</Text>}
+                    {errors.originBranch && <Text style={styles.errorText}>{errors.originBranch}</Text>}
+
+                    <Text style={styles.sectionTitle}>Destination Hub (Nearest to delivery)</Text>
+                    <View style={styles.branchGrid}>
+                        {branches?.map((branch) => (
+                            <Pressable
+                                key={`dest-${branch._id}`}
+                                style={[styles.branchChip, form.destinationBranch === branch._id && styles.branchChipActive, errors.destinationBranch && { borderColor: colors.error }]}
+                                onPress={() => updateField('destinationBranch', branch._id)}
+                            >
+                                <Text style={[styles.branchChipText, form.destinationBranch === branch._id && { color: '#fff' }]}>
+                                    {branch.name}
+                                </Text>
+                            </Pressable>
+                        ))}
+                    </View>
+                    {errors.destinationBranch && <Text style={styles.errorText}>{errors.destinationBranch}</Text>}
 
                     <Text style={styles.sectionTitle}>Delivery Speed</Text>
                     <View style={styles.deliveryTypeRow}>
@@ -318,16 +343,29 @@ export default function AddCourierScreen() {
                             style={[styles.typeCard, form.deliveryType === 'normal' && styles.typeCardActive]}
                             onPress={() => updateField('deliveryType', 'normal')}
                         >
-                            <Text style={[styles.typeText, form.deliveryType === 'normal' && styles.typeTextActive]}>Normal</Text>
+                            <Text style={[styles.typeText, form.deliveryType === 'normal' && { color: colors.primary }]}>Normal</Text>
                             <Text style={styles.typeDesc}>Standard Rates</Text>
                         </Pressable>
                         <Pressable 
                             style={[styles.typeCard, form.deliveryType === 'express' && styles.typeCardExpress]}
                             onPress={() => updateField('deliveryType', 'express')}
                         >
-                            <Text style={[styles.typeText, form.deliveryType === 'express' && { color: '#fff' }]}>Express</Text>
+                            <Text style={[styles.typeText, form.deliveryType === 'express' && { color: '#fff' }]}>Express (+50%)</Text>
                             <Text style={[styles.typeDesc, form.deliveryType === 'express' && { color: 'rgba(255,255,255,0.8)' }]}>Priority</Text>
                         </Pressable>
+                    </View>
+
+                    <Text style={styles.sectionTitle}>Payment Method</Text>
+                    <View style={styles.deliveryTypeRow}>
+                        {['cash', 'card', 'prepaid'].map((method) => (
+                            <Pressable 
+                                key={method}
+                                style={[styles.typeCard, form.paymentMethod === method && styles.typeCardActive]}
+                                onPress={() => updateField('paymentMethod', method)}
+                            >
+                                <Text style={[styles.typeText, form.paymentMethod === method && { color: colors.primary }, { textTransform: 'capitalize' }]}>{method}</Text>
+                            </Pressable>
+                        ))}
                     </View>
 
                     {isStaff && (

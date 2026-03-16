@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { View, ScrollView, StyleSheet, Pressable, Text, Modal, KeyboardAvoidingView, Platform, Alert, FlatList, Image } from 'react-native';
+import { View, ScrollView, StyleSheet, Pressable, Text, Modal, KeyboardAvoidingView, Platform, Alert, FlatList, Image, Clipboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack } from 'expo-router';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
@@ -9,6 +9,7 @@ import { StatusBadge, FormInput, ActivityLog, SignaturePad } from '../../src/com
 import { colors, spacing, fontSize, globalStyles } from '../../src/styles/theme';
 import { LoadingState } from '../../src/components';
 import { useAuth } from '../../src/components/auth-context';
+import { useSafeNavigation } from '../../src/utils/navigation';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -26,18 +27,18 @@ const statusOptions: { label: string; value: CourierStatus }[] = [
 
 export default function CourierDetailsScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
-    const router = useRouter();
+    const router = useSafeNavigation();
     const { user } = useAuth();
 
     const courier = useQuery(api.couriers.getById, { id: id as Id<'couriers'>, userId: user?._id as string });
     const agents = useQuery(api.users.listAgents, user?.role === 'branch_manager' ? { branchId: user.branchId as Id<'branches'> } : {});
     const branches = useQuery(api.branches.list);
-    
+
     const isAdmin = user?.role === 'admin';
     const isBranchManager = user?.role === 'branch_manager';
     const isStaff = isAdmin || isBranchManager;
     const isAssignedToMe = courier?.assignedTo === user?._id;
-    
+
     const updateStatus = useMutation(api.couriers.updateStatus);
     const removeCourier = useMutation(api.couriers.remove);
     const completeDelivery = useMutation(api.couriers.completeDelivery);
@@ -46,6 +47,10 @@ export default function CourierDetailsScreen() {
     const generateUploadUrl = useMutation(api.couriers.generateUploadUrl);
     const cancelCourier = useMutation(api.couriers.cancelCourier);
 
+    const markPickedUp = useMutation(api.couriers.markPickedUp);
+    const transferToDestination = useMutation(api.couriers.transferToDestination);
+    const arriveAtDestinationHub = useMutation(api.couriers.arriveAtDestinationHub);
+
     const [showStatusModal, setShowStatusModal] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [showPodModal, setShowPodModal] = useState(false);
@@ -53,6 +58,8 @@ export default function CourierDetailsScreen() {
     const [showBranchModal, setShowBranchModal] = useState(false);
     const [showEditModal, setShowEditModal] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isEditingWeight, setIsEditingWeight] = useState(false);
+    const [weightInput, setWeightInput] = useState('');
 
     const [editForm, setEditForm] = useState({
         senderName: '',
@@ -65,6 +72,17 @@ export default function CourierDetailsScreen() {
         weight: '',
         deliveryType: 'normal' as 'normal' | 'express',
     });
+
+    const handleCopyId = () => {
+        if (courier?.trackingId) {
+            Clipboard.setString(courier.trackingId);
+            if (Platform.OS === 'web') {
+                window.alert('Tracking ID copied to clipboard!');
+            } else {
+                Alert.alert('Copied', 'Tracking ID copied to clipboard.');
+            }
+        }
+    };
 
     const updateCourier = useMutation(api.couriers.update);
 
@@ -115,8 +133,8 @@ export default function CourierDetailsScreen() {
             "This will re-activate the courier and move it back to 'Booked' status. Continue?",
             [
                 { text: "No", style: "cancel" },
-                { 
-                    text: "Yes, Re-post", 
+                {
+                    text: "Yes, Re-post",
                     onPress: async () => {
                         try {
                             await updateStatus({ id: courier!._id, status: 'booked' });
@@ -141,12 +159,15 @@ export default function CourierDetailsScreen() {
             "Are you sure you want to cancel this courier? This action cannot be undone.",
             [
                 { text: "Keep Booking", style: "cancel" },
-                { 
-                    text: "Yes, Cancel", 
+                {
+                    text: "Yes, Cancel",
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            await cancelCourier({ id: id as Id<'couriers'> });
+                            await cancelCourier({
+                                id: id as Id<'couriers'>,
+                                userId: user?._id as Id<'users'>
+                            });
                             Alert.alert("Success", "Courier cancelled successfully.");
                         } catch (e: any) {
                             Alert.alert("Error", e.message);
@@ -164,17 +185,23 @@ export default function CourierDetailsScreen() {
         otpCode: '',
     });
 
+    const [scrollEnabled, setScrollEnabled] = useState(true);
+
     const triggerNotification = (status: string) => {
-        const msg = status === 'out_for_delivery' 
+        const msg = status === 'out_for_delivery'
             ? `SMS Sent to ${courier?.receiverPhone}: Your parcel is out for delivery with agent.`
             : `Email Sent to ${courier?.senderName}: Parcel status updated to ${status.replace('_', ' ')}.`;
-        
+
         Alert.alert('System Notification', msg);
     };
 
     const handleUpdateStatus = async (status: CourierStatus) => {
         try {
-            await updateStatus({ id: id as Id<'couriers'>, status });
+            await updateStatus({
+                id: id as Id<'couriers'>,
+                status,
+                userId: user?._id as Id<'users'>
+            });
             setShowStatusModal(false);
             triggerNotification(status);
         } catch (e: any) {
@@ -184,8 +211,8 @@ export default function CourierDetailsScreen() {
 
     const handleAssignAgent = async (agentId: Id<'users'>) => {
         try {
-            await assignAgent({ 
-                id: id as Id<'couriers'>, 
+            await assignAgent({
+                id: id as Id<'couriers'>,
                 agentId,
                 userId: user?._id as Id<'users'>
             });
@@ -198,7 +225,11 @@ export default function CourierDetailsScreen() {
 
     const handleTransferHub = async (branchId: Id<'branches'>) => {
         try {
-            await assignBranch({ id: id as Id<'couriers'>, branchId });
+            await assignBranch({
+                id: id as Id<'couriers'>,
+                branchId,
+                userId: user?._id as Id<'users'>
+            });
             setShowBranchModal(false);
             Alert.alert('Success', 'Parcel transferred to selected hub.');
         } catch (e: any) {
@@ -206,11 +237,67 @@ export default function CourierDetailsScreen() {
         }
     };
 
+    const handlePickupAction = async () => {
+        try {
+            await markPickedUp({ id: id as Id<'couriers'>, agentId: user?._id as Id<'users'> });
+            triggerNotification('picked_up');
+        } catch (e: any) {
+            Alert.alert('Error', e.message);
+        }
+    };
+
+    const handleTransferAction = async () => {
+        setIsSubmitting(true);
+        try {
+            await transferToDestination({ id: id as Id<'couriers'>, managerId: user?._id as Id<'users'> });
+            triggerNotification('in_transit');
+        } catch (e: any) {
+            Alert.alert('Error', e.message);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleReceiveAction = async () => {
+        setIsSubmitting(true);
+        try {
+            await arriveAtDestinationHub({ id: id as Id<'couriers'>, managerId: user?._id as Id<'users'> });
+            triggerNotification('dispatched');
+        } catch (e: any) {
+            Alert.alert('Error', e.message);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleUpdateWeight = async () => {
+        const val = parseFloat(weightInput);
+        if (isNaN(val) || val <= 0) return Alert.alert('Invalid', 'Please enter a valid weight.');
+
+        setIsSubmitting(true);
+        try {
+            await updateCourier({
+                id: id as Id<'couriers'>,
+                weight: val,
+                userId: user?._id as Id<'users'>
+            });
+            setIsEditingWeight(false);
+            Alert.alert('Success', 'Weight updated successfully.');
+        } catch (e: any) {
+            Alert.alert('Error', e.message);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     const uploadToCloud = async (uri: string, isBase64 = false) => {
         try {
             const postUrl = await generateUploadUrl();
-            const response = await fetch(uri);
-            const blob = await response.blob();
+
+            // Safer way to get blob in React Native for local/data URIs
+            // Using fetch().blob() is more reliable for data URIs than XHR
+            const blob = await (await fetch(uri)).blob();
+
             const result = await fetch(postUrl, {
                 method: "POST",
                 headers: { "Content-Type": isBase64 ? "image/png" : "image/jpeg" },
@@ -246,7 +333,12 @@ export default function CourierDetailsScreen() {
             triggerNotification('delivered');
             Alert.alert('Success', 'Delivery completed and Proof stored in cloud.');
         } catch (error: any) {
-            Alert.alert('Error', error.message || 'Failed to complete delivery.');
+            const errorMsg = error.message || '';
+            if (errorMsg.includes("Invalid OTP")) {
+                Alert.alert('Wrong OTP', 'The 4-digit code provided does not match our records. Please verify with the receiver.');
+            } else {
+                Alert.alert('Error', errorMsg || 'Failed to complete delivery.');
+            }
         } finally {
             setIsSubmitting(false);
         }
@@ -273,7 +365,7 @@ export default function CourierDetailsScreen() {
     return (
         <SafeAreaView style={globalStyles.safeArea}>
             <Stack.Screen options={{ headerShown: false }} />
-            
+
             <View style={styles.header}>
                 <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.backButtonContainer}>
                     <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -288,7 +380,11 @@ export default function CourierDetailsScreen() {
                 </View>
             </View>
 
-            <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+            <ScrollView
+                style={styles.container}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+            >
                 {/* Cancelled Alert Banner */}
                 {isCancelled && (
                     <View style={styles.cancelledBanner}>
@@ -325,7 +421,20 @@ export default function CourierDetailsScreen() {
                 {/* Primary Card: Tracking & Participants */}
                 <View style={globalStyles.card}>
                     <Text style={styles.trackingLabel}>Tracking ID</Text>
-                    <Text style={styles.trackingId}>{courier.trackingId}</Text>
+                    <View style={[globalStyles.row, { alignItems: 'center', gap: 12 }]}>
+                        <Text style={styles.trackingId}>{courier.trackingId}</Text>
+                        <Pressable onPress={handleCopyId} style={styles.copyButton}>
+                            <Ionicons name="copy-outline" size={18} color={colors.primary} />
+                        </Pressable>
+                    </View>
+                    {courier.agentName && (
+                        <View style={{ marginTop: spacing.xs, marginBottom: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Ionicons name="person" size={14} color={colors.primary} />
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: colors.primary }}>
+                                Agent: {courier.agentName}
+                            </Text>
+                        </View>
+                    )}
                     <View style={styles.divider} />
                     <View style={globalStyles.row}>
                         <View style={{ flex: 1 }}>
@@ -418,8 +527,8 @@ export default function CourierDetailsScreen() {
                             </View>
                         </View>
                     </View>
-                    <Pressable 
-                        style={styles.invoiceBtn} 
+                    <Pressable
+                        style={styles.invoiceBtn}
                         onPress={() => router.push(`/couriers/${id}/invoice`)}
                     >
                         <Ionicons name="receipt-outline" size={18} color={colors.primary} />
@@ -435,8 +544,8 @@ export default function CourierDetailsScreen() {
                         <Text style={[styles.mutedText, { marginBottom: spacing.md }]}>
                             You can cancel this booking as it hasn't been picked up yet. No charges will be applied.
                         </Text>
-                        <Pressable 
-                            style={[globalStyles.button, { backgroundColor: colors.error }]} 
+                        <Pressable
+                            style={[globalStyles.button, { backgroundColor: colors.error }]}
                             onPress={handleCancelCourier}
                         >
                             <Ionicons name="close-circle" size={20} color="#fff" />
@@ -454,9 +563,9 @@ export default function CourierDetailsScreen() {
                             {courier.pod.signatureUrl && (
                                 <View style={styles.podImageContainer}>
                                     <Text style={styles.tinyLabel}>Signature</Text>
-                                    <Image 
-                                        source={{ uri: courier.pod.signatureUrl }} 
-                                        style={styles.podPreview} 
+                                    <Image
+                                        source={{ uri: courier.pod.signatureUrl }}
+                                        style={[styles.podPreview, styles.podSignature]}
                                         resizeMode="contain"
                                     />
                                 </View>
@@ -464,9 +573,9 @@ export default function CourierDetailsScreen() {
                             {courier.pod.photoUrl && (
                                 <View style={styles.podImageContainer}>
                                     <Text style={styles.tinyLabel}>Arrival Photo</Text>
-                                    <Image 
-                                        source={{ uri: courier.pod.photoUrl }} 
-                                        style={styles.podPreview} 
+                                    <Image
+                                        source={{ uri: courier.pod.photoUrl }}
+                                        style={[styles.podPreview, styles.podPhoto]}
                                         resizeMode="contain"
                                     />
                                 </View>
@@ -490,16 +599,97 @@ export default function CourierDetailsScreen() {
                                 <Text style={styles.manageBtnText}>Transfer Hub</Text>
                             </Pressable>
                         </View>
+
+                        {/* Weight Management for Staff */}
+                        <View style={[styles.opsCard, { borderColor: colors.primary + '30' }]}>
+                            <View style={globalStyles.spaceBetween}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    <View style={[styles.opsIcon, { backgroundColor: colors.primary + '10' }]}>
+                                        <Ionicons name="scale-outline" size={18} color={colors.primary} />
+                                    </View>
+                                    <View>
+                                        <Text style={styles.opsLabel}>Parcel Weight</Text>
+                                        <Text style={styles.opsValue}>{courier.weight} kg</Text>
+                                    </View>
+                                </View>
+                                <Pressable
+                                    style={styles.opsActionBtn}
+                                    onPress={() => {
+                                        setIsEditingWeight(!isEditingWeight);
+                                        setWeightInput(courier.weight?.toString() || '');
+                                    }}
+                                >
+                                    <Text style={styles.opsActionText}>{isEditingWeight ? 'Cancel' : 'Update'}</Text>
+                                </Pressable>
+                            </View>
+                            {isEditingWeight && (
+                                <View style={styles.opsEditWeight}>
+                                    <View style={{ flex: 1 }}>
+                                        <FormInput
+                                            label="New Weight (kg)"
+                                            value={weightInput}
+                                            onChangeText={setWeightInput}
+                                            placeholder="Enter weight in kg"
+                                            keyboardType="numeric"
+                                            autoFocus
+                                        />
+                                    </View>
+                                    <Pressable
+                                        style={[globalStyles.button, { height: 50, paddingHorizontal: 20, backgroundColor: colors.primary, marginTop: 4 }]}
+                                        onPress={handleUpdateWeight}
+                                        disabled={isSubmitting}
+                                    >
+                                        <Text style={globalStyles.buttonText}>{isSubmitting ? '...' : 'Save'}</Text>
+                                    </Pressable>
+                                </View>
+                            )}
+                        </View>
+
+                        {/* Visibility limited to 'pending' (Arrived at Hub) for Transfer Hub */}
+                        {courier.currentStatus === 'pending' && (
+                            <Pressable
+                                style={[globalStyles.button, { marginTop: spacing.md, backgroundColor: colors.warning }]}
+                                onPress={handleTransferAction}
+                                disabled={isSubmitting}
+                            >
+                                <Ionicons name="airplane-outline" size={20} color="#fff" />
+                                <Text style={globalStyles.buttonText}>{isSubmitting ? 'Processing...' : 'Transfer to Destination Hub'}</Text>
+                            </Pressable>
+                        )}
+                        {courier.currentStatus === 'in_transit' && (
+                            <Pressable
+                                style={[globalStyles.button, { marginTop: spacing.md, backgroundColor: colors.primary }]}
+                                onPress={handleReceiveAction}
+                                disabled={isSubmitting}
+                            >
+                                <Ionicons name="download-outline" size={20} color="#fff" />
+                                <Text style={globalStyles.buttonText}>{isSubmitting ? 'Updating...' : 'Receive at Hub & Assign Agent'}</Text>
+                            </Pressable>
+                        )}
                     </View>
                 )}
 
-                {/* Delivery Completion (Assigned Agent Only) */}
+                {/* Agent Actions */}
                 {isAssignedToMe && courier.currentStatus !== 'delivered' && (
                     <View style={styles.agentActions}>
-                        <Pressable style={[globalStyles.button, { backgroundColor: colors.success }]} onPress={() => setShowPodModal(true)}>
-                            <Ionicons name="checkmark-done" size={20} color="#fff" />
-                            <Text style={globalStyles.buttonText}>Complete Delivery (POD)</Text>
-                        </Pressable>
+                        {courier.currentStatus === 'pickup_assigned' && (
+                            <Pressable style={[globalStyles.button, { backgroundColor: colors.warning, marginBottom: spacing.sm }]} onPress={handlePickupAction}>
+                                <Ionicons name="cube-outline" size={20} color="#fff" />
+                                <Text style={globalStyles.buttonText}>Mark as Picked Up</Text>
+                            </Pressable>
+                        )}
+                        {courier.currentStatus === 'picked_up' && (
+                            <Pressable style={[globalStyles.button, { backgroundColor: colors.primary, marginBottom: spacing.sm }]} onPress={() => handleUpdateStatus('pending')}>
+                                <Ionicons name="business-outline" size={20} color="#fff" />
+                                <Text style={globalStyles.buttonText}>Arrived at Hub</Text>
+                            </Pressable>
+                        )}
+                        {(courier.currentStatus === 'out_for_delivery' || courier.currentStatus === 'dispatched') && (
+                            <Pressable style={[globalStyles.button, { backgroundColor: colors.success }]} onPress={() => setShowPodModal(true)}>
+                                <Ionicons name="checkmark-done" size={20} color="#fff" />
+                                <Text style={globalStyles.buttonText}>Complete Delivery (POD)</Text>
+                            </Pressable>
+                        )}
                     </View>
                 )}
 
@@ -508,7 +698,12 @@ export default function CourierDetailsScreen() {
             </ScrollView>
 
             {/* Modals */}
-            <Modal visible={showStatusModal} transparent animationType="fade">
+            <Modal
+                visible={showStatusModal}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowStatusModal(false)}
+            >
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <Text style={styles.modalTitle}>Update Parcel Status</Text>
@@ -524,7 +719,12 @@ export default function CourierDetailsScreen() {
                 </View>
             </Modal>
 
-            <Modal visible={showAgentModal} transparent animationType="slide">
+            <Modal
+                visible={showAgentModal}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowAgentModal(false)}
+            >
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <Text style={styles.modalTitle}>Assign to Delivery Agent</Text>
@@ -548,7 +748,12 @@ export default function CourierDetailsScreen() {
                 </View>
             </Modal>
 
-            <Modal visible={showBranchModal} transparent animationType="slide">
+            <Modal
+                visible={showBranchModal}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowBranchModal(false)}
+            >
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <Text style={styles.modalTitle}>Transfer to Branch Hub</Text>
@@ -572,15 +777,33 @@ export default function CourierDetailsScreen() {
                 </View>
             </Modal>
 
-            <Modal visible={showPodModal} transparent animationType="slide">
+            <Modal
+                visible={showPodModal}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowPodModal(false)}
+            >
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <Text style={styles.modalTitle}>Proof of Delivery</Text>
-                        <ScrollView showsVerticalScrollIndicator={false}>
+                        <ScrollView
+                            scrollEnabled={scrollEnabled}
+                            showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
+                        >
                             <FormInput label="Receiver Name" value={podForm.signeeName} onChangeText={v => setPodForm(p => ({ ...p, signeeName: v }))} />
                             <FormInput label="OTP Code" value={podForm.otpCode} onChangeText={v => setPodForm(p => ({ ...p, otpCode: v }))} keyboardType="numeric" maxLength={4} />
                             <Text style={styles.label}>Draw Signature</Text>
-                            <SignaturePad onOK={sig => setPodForm(p => ({ ...p, signature: sig }))} />
+                            <View style={styles.signaturePadWrapper}>
+                                <SignaturePad
+                                    onOK={sig => {
+                                        setPodForm(p => ({ ...p, signature: sig }));
+                                        setScrollEnabled(true);
+                                    }}
+                                    onBegin={() => setScrollEnabled(false)}
+                                    onEnd={() => setScrollEnabled(true)}
+                                />
+                            </View>
                             <Pressable style={styles.photoButton} onPress={handleTakePhoto}>
                                 <Ionicons name="camera" size={20} color={colors.primary} />
                                 <Text style={styles.photoButtonText}>{podForm.photo ? "Photo Captured" : "Take Arrival Photo"}</Text>
@@ -596,11 +819,19 @@ export default function CourierDetailsScreen() {
                 </View>
             </Modal>
 
-            <Modal visible={showEditModal} transparent animationType="slide">
+            <Modal
+                visible={showEditModal}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowEditModal(false)}
+            >
                 <View style={styles.modalOverlay}>
                     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContent}>
                         <Text style={styles.modalTitle}>Edit Courier Details</Text>
-                        <ScrollView showsVerticalScrollIndicator={false}>
+                        <ScrollView
+                            showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
+                        >
                             {isMoving && (
                                 <View style={styles.lockWarning}>
                                     <Ionicons name="lock-closed" size={14} color={colors.warning} />
@@ -613,30 +844,30 @@ export default function CourierDetailsScreen() {
                             <FormInput label="Sender Phone" value={editForm.senderPhone} onChangeText={v => setEditForm(p => ({ ...p, senderPhone: v }))} keyboardType="phone-pad" />
                             <FormInput label="Receiver Name" value={editForm.receiverName} onChangeText={v => setEditForm(p => ({ ...p, receiverName: v }))} />
                             <FormInput label="Receiver Phone" value={editForm.receiverPhone} onChangeText={v => setEditForm(p => ({ ...p, receiverPhone: v }))} keyboardType="phone-pad" />
-                            
+
                             <Text style={styles.formSectionLabel}>ADDRESSES</Text>
                             <FormInput label="Pickup Address" value={editForm.pickupAddress} onChangeText={v => setEditForm(p => ({ ...p, pickupAddress: v }))} multiline />
                             <FormInput label="Delivery Address" value={editForm.deliveryAddress} onChangeText={v => setEditForm(p => ({ ...p, deliveryAddress: v }))} multiline />
 
                             <Text style={styles.formSectionLabel}>SPECIFICATIONS</Text>
-                            <FormInput 
-                                label="Weight (kg)" 
-                                value={editForm.weight} 
-                                onChangeText={v => setEditForm(p => ({ ...p, weight: v }))} 
-                                keyboardType="numeric" 
+                            <FormInput
+                                label="Weight (kg)"
+                                value={editForm.weight}
+                                onChangeText={v => setEditForm(p => ({ ...p, weight: v }))}
+                                keyboardType="numeric"
                                 editable={!isMoving}
                             />
-                            
+
                             <Text style={styles.label}>Delivery Type</Text>
                             <View style={[globalStyles.row, { gap: spacing.sm, marginBottom: spacing.md }]}>
-                                <Pressable 
+                                <Pressable
                                     style={[styles.typeSelect, editForm.deliveryType === 'normal' && styles.typeSelectActive, isMoving && { opacity: 0.5 }]}
                                     onPress={() => !isMoving && setEditForm(p => ({ ...p, deliveryType: 'normal' }))}
                                     disabled={isMoving}
                                 >
                                     <Text style={[styles.typeSelectText, editForm.deliveryType === 'normal' && styles.typeSelectTextActive]}>Normal</Text>
                                 </Pressable>
-                                <Pressable 
+                                <Pressable
                                     style={[styles.typeSelect, editForm.deliveryType === 'express' && styles.typeSelectActive, isMoving && { opacity: 0.5 }]}
                                     onPress={() => !isMoving && setEditForm(p => ({ ...p, deliveryType: 'express' }))}
                                     disabled={isMoving}
@@ -646,7 +877,7 @@ export default function CourierDetailsScreen() {
                             </View>
 
                             <FormInput label="Additional Notes" value={editForm.notes} onChangeText={v => setEditForm(p => ({ ...p, notes: v }))} multiline />
-                            
+
                             <View style={{ marginTop: spacing.xl, gap: spacing.md }}>
                                 <Pressable style={globalStyles.button} onPress={handleSaveEdit} disabled={isSubmitting}>
                                     <Text style={globalStyles.buttonText}>{isSubmitting ? "Saving..." : "Save Changes"}</Text>
@@ -661,7 +892,12 @@ export default function CourierDetailsScreen() {
                 </View>
             </Modal>
 
-            <Modal visible={showDeleteModal} transparent animationType="fade">
+            <Modal
+                visible={showDeleteModal}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowDeleteModal(false)}
+            >
                 <View style={styles.modalOverlay}>
                     <View style={[styles.modalContent, { maxHeight: 250 }]}>
                         <Text style={styles.modalTitle}>Delete Courier?</Text>
@@ -692,6 +928,7 @@ const styles = StyleSheet.create({
     updateStatusText: { color: colors.primary, fontSize: 12, fontWeight: 'bold' },
     trackingLabel: { fontSize: 10, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 },
     trackingId: { fontSize: 24, fontWeight: '900', color: colors.primary },
+    copyButton: { padding: 4, marginLeft: 4 },
     divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.md },
     label: { fontSize: 10, color: colors.textSecondary, marginBottom: 4, textTransform: 'uppercase', fontWeight: '600' },
     value: { fontSize: 15, fontWeight: '600', color: colors.text },
@@ -715,14 +952,17 @@ const styles = StyleSheet.create({
     podVisuals: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
     podImageContainer: { flex: 1 },
     tinyLabel: { fontSize: 10, color: colors.textMuted, marginBottom: 4 },
-    podPreview: { 
-        width: '100%', 
-        height: 180, // Increased from 100 for better visibility
-        borderRadius: 8, 
-        backgroundColor: '#FFFFFF', // FORCED WHITE for signature visibility
-        borderWidth: 1, 
-        borderColor: colors.border 
+    podPreview: {
+        width: '100%',
+        height: 120,
+        borderRadius: 12,
+        backgroundColor: colors.surface,
+        borderWidth: 1.5,
+        borderColor: colors.border,
+        padding: 4
     },
+    podSignature: { backgroundColor: '#F9FAFB' }, // Specific background for signature to stand out
+    podPhoto: { backgroundColor: '#F3F4F6' },
     agentActions: { padding: spacing.md },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
     modalContent: { backgroundColor: colors.background, padding: spacing.xl, borderTopLeftRadius: 32, borderTopRightRadius: 32, maxHeight: '90%' },
@@ -744,4 +984,24 @@ const styles = StyleSheet.create({
     typeSelectActive: { borderColor: colors.primary, backgroundColor: colors.primary + '10' },
     typeSelectText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
     typeSelectTextActive: { color: colors.primary, fontWeight: 'bold' },
+    opsCard: {
+        marginTop: spacing.md,
+        padding: spacing.md,
+        backgroundColor: colors.surface,
+        borderRadius: 16,
+        borderWidth: 1.5,
+        borderColor: colors.border,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2
+    },
+    opsIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+    opsLabel: { fontSize: 10, color: colors.textSecondary, textTransform: 'uppercase', fontWeight: 'bold', letterSpacing: 0.5 },
+    opsValue: { fontSize: 18, fontWeight: '800', color: colors.text, marginTop: 2 },
+    opsActionBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: colors.primary + '10' },
+    opsActionText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+    opsEditWeight: { marginTop: spacing.md, flexDirection: 'row', gap: 10, alignItems: 'center' },
+    signaturePadWrapper: { marginVertical: spacing.md, minHeight: 350 },
 });
