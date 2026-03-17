@@ -31,8 +31,8 @@ export default function InvoiceScreen() {
 
     // Pricing Constants (Should match convex/couriers.ts)
     const BASE_RATE = 100; 
-    const WEIGHT_RATE = 20; 
-    const DISTANCE_RATE = 5; 
+    const WEIGHT_RATE = 10; 
+    const DISTANCE_RATE = 3; 
 
     const weightCharge = (courier.weight || 0) * WEIGHT_RATE;
     const distanceCharge = (courier.distance || 0) * DISTANCE_RATE;

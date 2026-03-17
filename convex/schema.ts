@@ -58,6 +58,8 @@ export default defineSchema({
         .index("by_createdAt", ["createdAt"])
         .index("by_assignedTo", ["assignedTo"])
         .index("by_branchId", ["branchId"])
+        .index("by_originBranch", ["originBranch"])
+        .index("by_destinationBranch", ["destinationBranch"])
         .index("by_senderPhone", ["senderPhone"])
         .index("by_receiverPhone", ["receiverPhone"])
         .index("by_senderName", ["senderName"]),
@@ -122,4 +124,23 @@ export default defineSchema({
         .index("by_courierId", ["courierId"])
         .index("by_trackingId", ["trackingId"])
         .index("by_timestamp", ["timestamp"]),
+
+    branchEarnings: defineTable({
+        branchId: v.id("branches"),
+        courierId: v.id("couriers"),
+        amount: v.number(),
+        shareType: v.union(v.literal("origin"), v.literal("destination")),
+        timestamp: v.number(),
+    })
+        .index("by_branchId", ["branchId"])
+        .index("by_courierId", ["courierId"]),
+
+    agentEarnings: defineTable({
+        agentId: v.id("users"),
+        courierId: v.id("couriers"),
+        amount: v.number(),
+        timestamp: v.number(),
+    })
+        .index("by_agentId", ["agentId"])
+        .index("by_courierId", ["courierId"]),
 });

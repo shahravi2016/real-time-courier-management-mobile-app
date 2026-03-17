@@ -164,8 +164,15 @@ export default function AddCourierScreen() {
         if (!form.receiverPhone.trim() || form.receiverPhone.length < 10) newErrors.receiverPhone = 'Valid 10-digit phone is required';
         if (!form.pickupAddress.trim()) newErrors.pickupAddress = 'Pickup point is required';
         if (!form.deliveryAddress.trim()) newErrors.deliveryAddress = 'Delivery destination is required';
-        if (!form.originBranch) newErrors.originBranch = 'Please select a pickup hub';
         if (!form.destinationBranch) newErrors.destinationBranch = 'Please select a destination hub';
+        
+        // Custom validations
+        if (form.senderPhone && form.receiverPhone && form.senderPhone.replace(/\D/g, '') === form.receiverPhone.replace(/\D/g, '')) {
+            newErrors.receiverPhone = 'Sender and Receiver phone numbers cannot be the same';
+        }
+        if (form.pickupAddress && form.deliveryAddress && form.pickupAddress.trim().toLowerCase() === form.deliveryAddress.trim().toLowerCase()) {
+            newErrors.deliveryAddress = 'Pickup and Delivery addresses cannot be the same';
+        }
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;

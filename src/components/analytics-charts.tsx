@@ -78,13 +78,18 @@ export const AnalyticsChart: React.FC<ChartProps> = ({ title, data, type = 'bar'
                                 style={[
                                     styles.segment, 
                                     { 
-                                        flex: item.value || 0.0001, 
+                                        flex: item.value || 0.001, 
                                         backgroundColor: item.color || (index === 0 ? colors.primary : index === 1 ? colors.success : colors.warning) 
                                     }
                                 ]} 
                             />
                         ))}
                     </View>
+                    {totalValue === 0 && data.length > 0 && (
+                        <Text style={[styles.emptyText, { marginTop: -spacing.md, marginBottom: spacing.md }]}>
+                            Pending revenue from {data.length} hubs
+                        </Text>
+                    )}
                     <View style={styles.legendContainer}>
                         {data.map((item, index) => (
                             <View key={index} style={styles.legendItem}>

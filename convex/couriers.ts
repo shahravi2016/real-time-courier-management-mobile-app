@@ -60,8 +60,8 @@ function generateInvoiceNumber(): string {
 }
 
 const BASE_RATE = 100; 
-const WEIGHT_RATE = 20; 
-const DISTANCE_RATE = 5; 
+const WEIGHT_RATE = 10; 
+const DISTANCE_RATE = 3; 
 
 function calculatePrice(weight?: number, distance?: number, type?: "normal" | "express") {
     let subtotal = BASE_RATE;
@@ -203,9 +203,26 @@ export const getById = query({
 export const getStats = query({
     args: { branchId: v.optional(v.id("branches")) },
     handler: async (ctx, args) => {
-        let all = args.branchId 
-            ? await ctx.db.query("couriers").withIndex("by_branchId", q => q.eq("branchId", args.branchId)).collect()
-            : await ctx.db.query("couriers").collect();
+        let all;
+        let revenue = 0;
+
+        if (args.branchId) {
+            const branchId = args.branchId;
+            // Persistence: Origin or Destination or Current
+            const originC = await ctx.db.query("couriers").withIndex("by_originBranch", q => q.eq("originBranch", branchId)).collect();
+            const destC = await ctx.db.query("couriers").withIndex("by_destinationBranch", q => q.eq("destinationBranch", branchId)).collect();
+            const currentC = await ctx.db.query("couriers").withIndex("by_branchId", q => q.eq("branchId", branchId)).collect();
+
+            const map = new Map<Id<"couriers">, any>();
+            [...originC, ...destC, ...currentC].forEach(c => map.set(c._id, c));
+            all = Array.from(map.values());
+
+            const earnings = await ctx.db.query("branchEarnings").withIndex("by_branchId", q => q.eq("branchId", branchId)).collect();
+            revenue = earnings.reduce((sum, e) => sum + e.amount, 0);
+        } else {
+            all = await ctx.db.query("couriers").collect();
+            revenue = all.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0);
+        }
 
         const needsAttention = all.filter(c => c.currentStatus === "booked" && !c.branchId).length;
 
@@ -215,8 +232,8 @@ export const getStats = query({
             pickedUp: all.filter(c => c.currentStatus === "picked_up").length,
             dispatched: all.filter(c => c.currentStatus === "dispatched").length,
             delivered: all.filter(c => c.currentStatus === "delivered").length,
-            needsAttention, 
-            revenue: all.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0),
+            needsAttention,
+            revenue,
         };
     },
 });
@@ -226,12 +243,28 @@ export const getAdminDashboardStats = query({
     handler: async (ctx) => {
         const allCouriers = await ctx.db.query("couriers").collect();
         const allBranches = await ctx.db.query("branches").collect();
+        const allEarnings = await ctx.db.query("branchEarnings").collect();
+        
         const branchContribution = allBranches.map(b => {
-            const branchCouriers = allCouriers.filter(c => c.branchId === b._id);
+            const branchEarnings = allEarnings.filter(e => e.branchId === b._id);
+            // Persistent count: Involved in any way
+            const branchCouriers = allCouriers.filter(c => c.originBranch === b._id || c.destinationBranch === b._id || c.branchId === b._id);
+            
+            let revenue = branchEarnings.reduce((sum, e) => sum + e.amount, 0);
+            
+            // Fallback for branch contribution if NO earnings are recorded yet
+            if (allEarnings.length === 0) {
+                // Estimate 45% for origin branches and 45% for destination branches
+                const asOrigin = allCouriers.filter(c => c.originBranch === b._id && c.currentStatus === "delivered");
+                const asDest = allCouriers.filter(c => c.destinationBranch === b._id && c.currentStatus === "delivered");
+                revenue = asOrigin.reduce((sum, c) => sum + (c.price || 0) * 0.45, 0) + 
+                          asDest.reduce((sum, c) => sum + (c.price || 0) * 0.45, 0);
+            }
+
             return {
                 name: b.name,
                 count: branchCouriers.length,
-                revenue: branchCouriers.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0)
+                revenue: Math.round(revenue)
             };
         });
         
@@ -243,25 +276,48 @@ export const getAdminDashboardStats = query({
             return `${d.toLocaleString('en-US', { month: 'short' })} ${d.getDate()}`;
         };
 
-        const ordersByDate = allCouriers.filter(c => c.createdAt >= last30Days).reduce((acc: any, c) => {
+        // Standardized Day buckets (Last 7 days for mobile visibility)
+        const dayLabels = Array.from({ length: 7 }, (_, i) => {
+            const d = new Date(now - (6 - i) * 24 * 60 * 60 * 1000);
+            return formatDate(d.getTime());
+        });
+
+        const ordersByDate = allCouriers.filter(c => c.createdAt >= (now - 7 * 24 * 60 * 60 * 1000)).reduce((acc: any, c) => {
             const day = formatDate(c.createdAt);
             acc[day] = (acc[day] || 0) + 1;
             return acc;
         }, {});
 
-        const revenueByDate = allCouriers.filter(c => c.currentStatus === "delivered" && c.createdAt >= last30Days).reduce((acc: any, c) => {
-            const day = formatDate(c.createdAt);
-            acc[day] = (acc[day] || 0) + (c.price || 0);
+        // Combine ledger earnings + historical estimates (if no ledger entries exist for a courier)
+        const revenueByDate = dayLabels.reduce((acc: any, day) => {
+            acc[day] = 0;
             return acc;
         }, {});
 
-        const monthlyOrders = Object.entries(ordersByDate).map(([label, value]) => ({ label, value: value as number }));
-        const revenueTrends = Object.entries(revenueByDate).map(([label, value]) => ({ label, value: value as number }));
+        // 1. Add from Ledger
+        allEarnings.filter(e => e.timestamp >= (now - 7 * 24 * 60 * 60 * 1000)).forEach(e => {
+            const day = formatDate(e.timestamp);
+            if (revenueByDate[day] !== undefined) revenueByDate[day] += e.amount;
+        });
+
+        // 2. Fallback for historical (delivered but no ledger entries)
+        // If there are NO ledger entries at all, use 100% of price as estimate for the graph
+        if (allEarnings.length === 0) {
+            allCouriers.filter(c => c.currentStatus === "delivered" && c.createdAt >= (now - 7 * 24 * 60 * 60 * 1000)).forEach(c => {
+                const day = formatDate(c.createdAt);
+                if (revenueByDate[day] !== undefined) revenueByDate[day] += (c.price || 0);
+            });
+        }
+
+        const monthlyOrders = dayLabels.map(label => ({ label, value: ordersByDate[label] || 0 }));
+        const revenueTrends = dayLabels.map(label => ({ label, value: revenueByDate[label] || 0 }));
 
         return {
             global: {
                 total: allCouriers.length,
-                revenue: allCouriers.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0),
+                revenue: allEarnings.length > 0 
+                    ? allEarnings.reduce((sum, e) => sum + e.amount, 0)
+                    : allCouriers.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0),
             },
             branchContribution,
             monthlyOrders,
@@ -273,26 +329,55 @@ export const getAdminDashboardStats = query({
 export const getBranchDashboardStats = query({
     args: { branchId: v.id("branches") },
     handler: async (ctx, args) => {
-        const myCouriers = await ctx.db.query("couriers").withIndex("by_branchId", q => q.eq("branchId", args.branchId)).collect();
+        // Persistence: Combine couriers where this branch was origin, destination, or current
+        const originC = await ctx.db.query("couriers").withIndex("by_originBranch", q => q.eq("originBranch", args.branchId)).collect();
+        const destC = await ctx.db.query("couriers").withIndex("by_destinationBranch", q => q.eq("destinationBranch", args.branchId)).collect();
+        const currentC = await ctx.db.query("couriers").withIndex("by_branchId", q => q.eq("branchId", args.branchId)).collect();
+        
+        const map = new Map<Id<"couriers">, any>();
+        [...originC, ...destC, ...currentC].forEach(c => map.set(c._id, c));
+        const myCouriers = Array.from(map.values());
+
         const now = Date.now();
-        const last30Days = now - (30 * 24 * 60 * 60 * 1000);
         
         const formatDate = (ts: number) => {
             const d = new Date(ts);
             return `${d.toLocaleString('en-US', { month: 'short' })} ${d.getDate()}`;
         };
 
-        const ordersByDate = myCouriers.filter(c => c.createdAt >= last30Days).reduce((acc: any, c) => {
+        const dayLabels = Array.from({ length: 7 }, (_, i) => {
+            const d = new Date(now - (6 - i) * 24 * 60 * 60 * 1000);
+            return formatDate(d.getTime());
+        });
+
+        const ordersByDate = myCouriers.filter(c => c.createdAt >= (now - 7 * 24 * 60 * 60 * 1000)).reduce((acc: any, c) => {
             const day = formatDate(c.createdAt);
             acc[day] = (acc[day] || 0) + 1;
             return acc;
         }, {});
 
-        const revenueByDate = myCouriers.filter(c => c.currentStatus === "delivered" && c.createdAt >= last30Days).reduce((acc: any, c) => {
-            const day = formatDate(c.createdAt);
-            acc[day] = (acc[day] || 0) + (c.price || 0);
+        // Revenue from EARNINGS table (Persistent 45% share)
+        const earnings = await ctx.db.query("branchEarnings")
+            .withIndex("by_branchId", q => q.eq("branchId", args.branchId))
+            .collect();
+        
+        const revenueByDate = dayLabels.reduce((acc: any, day) => {
+            acc[day] = 0;
             return acc;
         }, {});
+
+        earnings.filter(e => e.timestamp >= (now - 7 * 24 * 60 * 60 * 1000)).forEach(e => {
+            const day = formatDate(e.timestamp);
+            if (revenueByDate[day] !== undefined) revenueByDate[day] += e.amount;
+        });
+
+        // Fallback for historical (if no earnings recorded yet, show potential revenue from delivered)
+        if (earnings.length === 0) {
+            myCouriers.filter(c => c.currentStatus === "delivered" && c.createdAt >= (now - 7 * 24 * 60 * 60 * 1000)).forEach(c => {
+                const day = formatDate(c.createdAt);
+                if (revenueByDate[day] !== undefined) revenueByDate[day] += (c.price || 0) * 0.45; // Assume 45% origin share
+            });
+        }
 
         return {
             statusCounts: {
@@ -301,9 +386,11 @@ export const getBranchDashboardStats = query({
                 outForDelivery: myCouriers.filter(c => c.currentStatus === "out_for_delivery").length,
                 delivered: myCouriers.filter(c => c.currentStatus === "delivered").length,
             },
-            monthlyOrders: Object.entries(ordersByDate).map(([label, value]) => ({ label, value: value as number })),
-            branchRevenue: myCouriers.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0), 0),
-            revenueTrends: Object.entries(revenueByDate).map(([label, value]) => ({ label, value: value as number })),
+            monthlyOrders: dayLabels.map(label => ({ label, value: ordersByDate[label] || 0 })),
+            branchRevenue: earnings.length > 0 
+                ? earnings.reduce((sum, e) => sum + e.amount, 0)
+                : myCouriers.filter(c => c.currentStatus === "delivered").reduce((sum, c) => sum + (c.price || 0) * 0.45, 0),
+            revenueTrends: dayLabels.map(label => ({ label, value: revenueByDate[label] || 0 })),
         };
     },
 });
@@ -312,13 +399,16 @@ export const getAgentStats = query({
     args: { userId: v.id("users") },
     handler: async (ctx, args) => {
         const myJobs = await ctx.db.query("couriers").withIndex("by_assignedTo", q => q.eq("assignedTo", args.userId)).collect();
-        const completed = myJobs.filter(j => j.currentStatus === "delivered");
+        const earnings = await ctx.db.query("agentEarnings").withIndex("by_agentId", q => q.eq("agentId", args.userId)).collect();
+        const activeJobs = myJobs.filter(j => !["delivered", "cancelled"].includes(j.currentStatus));
+        
         return {
             totalJobs: myJobs.length,
-            activeJobs: myJobs.filter(j => !["delivered", "cancelled"].includes(j.currentStatus)).length,
-            completedJobs: completed.length,
-            earnings: completed.reduce((sum, j) => sum + ((j.price || 0) * 0.1), 0),
-            target: completed.length + 10,
+            activeJobs: activeJobs.length,
+            completedJobs: myJobs.filter(j => j.currentStatus === "delivered").length,
+            earnings: earnings.reduce((sum, e) => sum + e.amount, 0),
+            pendingEarnings: activeJobs.reduce((sum, j) => sum + Math.floor((j.price || 0) * 0.10), 0),
+            target: myJobs.filter(j => j.currentStatus === "delivered").length + 10,
         };
     },
 });
@@ -393,6 +483,15 @@ export const create = mutation({
         paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("prepaid"))),
     },
     handler: async (ctx, args) => {
+        // Validation: Unique phone and address
+        const sPhone = normalizePhone(args.senderPhone);
+        const rPhone = normalizePhone(args.receiverPhone);
+        if (sPhone === rPhone) throw new Error("Sender and Receiver phone numbers cannot be the same.");
+        
+        if (args.pickupAddress.trim().toLowerCase() === args.deliveryAddress.trim().toLowerCase()) {
+            throw new Error("Pickup and Delivery addresses cannot be the same.");
+        }
+
         const now = Date.now();
         const trackingId = generateTrackingId();
         const otpCode = generateOTP();
@@ -621,6 +720,60 @@ export const completeDelivery = mutation({
             description: "Delivery completed successfully",
             timestamp: Date.now()
         });
+
+        // Revenue Sharing Logic (45/45/10 split)
+        const totalPrice = courier.price || 0;
+        if (totalPrice > 0) {
+            const branchShare = Math.floor(totalPrice * 0.45);
+            const agentShare = Math.floor(totalPrice * 0.10);
+            const now = Date.now();
+
+            // Check existing earnings to avoid duplicates (Origin might be recorded at pickup)
+            const existing = await ctx.db.query("branchEarnings")
+                .withIndex("by_courierId", q => q.eq("courierId", args.id))
+                .collect();
+            
+            const hasOrigin = existing.some(e => e.shareType === "origin");
+            const hasDest = existing.some(e => e.shareType === "destination");
+
+            // 1. Origin Branch Share (If missed during pickup flow)
+            if (!hasOrigin) {
+                const originId = courier.originBranch || courier.branchId;
+                if (originId) {
+                    await ctx.db.insert("branchEarnings", {
+                        branchId: originId,
+                        courierId: args.id,
+                        amount: branchShare,
+                        shareType: "origin",
+                        timestamp: now,
+                    });
+                }
+            }
+
+            // 2. Destination Branch Share
+            if (!hasDest) {
+                const destId = courier.destinationBranch || courier.branchId;
+                if (destId) {
+                    await ctx.db.insert("branchEarnings", {
+                        branchId: destId,
+                        courierId: args.id,
+                        amount: branchShare,
+                        shareType: "destination",
+                        timestamp: now,
+                    });
+                }
+            }
+
+            // 3. Agent Share (Always at delivery)
+            if (courier.assignedTo) {
+                await ctx.db.insert("agentEarnings", {
+                    agentId: courier.assignedTo,
+                    courierId: args.id,
+                    amount: agentShare,
+                    timestamp: now,
+                });
+            }
+        }
     },
 });
 
@@ -752,6 +905,26 @@ export const markPickedUp = mutation({
             currentStatus: "picked_up",
             updatedAt: Date.now()
         });
+
+        // Incremental Revenue: Record Origin Share at Pickup
+        const originId = courier.originBranch || courier.branchId;
+        if (originId && (courier.price || 0) > 0) {
+            // Safeguard: Check if already exists (highly unlikely at this stage but good for idempotent)
+            const existing = await ctx.db.query("branchEarnings")
+                .withIndex("by_courierId", q => q.eq("courierId", args.id))
+                .collect();
+            const hasOrigin = existing.some(e => e.shareType === "origin");
+            
+            if (!hasOrigin) {
+                await ctx.db.insert("branchEarnings", {
+                    branchId: originId,
+                    courierId: args.id,
+                    amount: Math.floor((courier.price || 0) * 0.45),
+                    shareType: "origin",
+                    timestamp: Date.now(),
+                });
+            }
+        }
         
         await ctx.db.insert("logs", {
             courierId: args.id, trackingId: courier.trackingId, action: "status_changed",
